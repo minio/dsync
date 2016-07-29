@@ -43,25 +43,29 @@ func testSingleLock() {
 }
 
 // Test two locks for same resource, one succeeds, one fails (after timeout)
-func twoTwoSimultaneousLocksForSameResource() {
+func testTwoSimultaneousLocksForSameResource() {
 
 	dm1 := DMutex{name: "aap"}
 	dm2 := DMutex{name: "aap"}
 
 	dm1.Lock()
+
+	go func() {
+		time.Sleep(5 * time.Second)
+		dm1.Unlock()
+	}()
+
 	dm2.Lock()
 
-	fmt.Println("We have both locks, waiting...")
+	fmt.Println("We have the other lock after first is released")
 	time.Sleep(2500 * time.Millisecond)
 
-	dm1.Unlock()
 	dm2.Unlock()
-
 
 }
 
 // Test two locks for same resource, one succeeds, one fails (after timeout)
-func twoTwoLocksForSameResourceAfterEachOther() {
+func testTwoLocksForSameResourceAfterEachOther() {
 
 }
 
@@ -86,7 +90,8 @@ func main() {
 
 	startServers()
 
-	testTwoSimultaneousLocksForDifferentResources()
+	testTwoSimultaneousLocksForSameResource()
+	//testTwoSimultaneousLocksForDifferentResources()
 
 	for j := 0; j < 25; j++ {
 		time.Sleep(10 * time.Millisecond)

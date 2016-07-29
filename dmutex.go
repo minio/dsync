@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"github.com/valyala/gorpc"
 	"log"
-	"sync"
+	"math/rand"
 	"strings"
+	"sync"
+	"time"
 )
 
 // A DMutex is a distributed mutual exclusion lock.
@@ -17,7 +19,8 @@ type DMutex struct {
 }
 
 type Granted struct {
-	index int
+	index  int
+	locked bool
 }
 
 // Lock locks dm.
@@ -26,9 +29,28 @@ type Granted struct {
 // blocks until the mutex is available.
 func (dm *DMutex) Lock() {
 
-	dm.locks = make([]bool, N)
+	rand.Seed(time.Now().UTC().UnixNano())
 
-	// TODO: optimization: do a quick check to see if this node already participates in a distributed lock, exit out with false if so
+	for {
+		locks := [N]bool{}
+		success := lock(locks, dm.name)
+		if success {
+			dm.locks = make([]bool, N)
+			copy(dm.locks[:], locks[:])
+			return
+		}
+
+		// We timed out on the previous lock, wait for random time,
+		// and try again afterwards
+		time.Sleep(time.Duration(/*rand.Float32() * */ 1000) * time.Millisecond)
+	}
+}
+
+// lock locks dm.
+//
+// If the lock is already in use, the calling goroutine
+// blocks until the mutex is available.
+func lock(locks [N]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, N/2+1)
@@ -46,15 +68,18 @@ func (dm *DMutex) Lock() {
 
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running goroutines.
-			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", dm.name))
+			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", lockName))
 			if err != nil {
 				log.Fatalf("Error when sending request to server: %s", err)
 			}
 			if !strings.HasPrefix(resp.(string), "minio/lock/") {
 				log.Fatalf("Unexpected response from the server: %+v", resp)
 			}
+			fmt.Println(resp)
+			parts := strings.Split(resp.(string), "/")
+			locked := parts[3] == "true"
 
-			ch <- Granted{index: index}
+			ch <- Granted{index: index, locked: locked}
 
 		}(index, node)
 	}
@@ -62,31 +87,68 @@ func (dm *DMutex) Lock() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
+	failed := false
+
 	go func() {
+
 		// Wait until we have received responses from quorum
 		i := 0
 		for ; i < N/2+1; i++ {
-			grant := <-ch
-			fmt.Println("Participating", grant.index)
 
-			// Mark that this node has acquired the lock
-			dm.locks[grant.index] = true
+			select {
+			case grant := <-ch:
+			    if grant.locked {
+					fmt.Println("Participating", grant.index)
+
+					// Mark that this node has acquired the lock
+					locks[grant.index] = true
+				} else {
+					failed = true
+					fmt.Println("one lock failed before quorum -- release locks acquired")
+					for lock := 0; lock < N; lock++ {
+						if locks[lock] {
+							go sendRelease(nodes[lock], lockName)
+							locks[lock] = false
+						}
+					}
+				}
+
+			case <-time.After(1000 * time.Millisecond):
+				failed = true
+				fmt.Println("timed out -- release locks acquired")
+				for lock := 0; lock < N; lock++ {
+					if locks[lock] {
+						go sendRelease(nodes[lock], lockName)
+						locks[lock] = false
+					}
+				}
+			}
+
+			if failed {
+				break
+			}
 		}
 
 		// Signal that we have the quorum (and have acquired the lock)
 		wg.Done()
 
-		// Wait for the other responses and immediately release the locks again
+		// Wait for the other responses and immediately release the locks
+		// (do not add them to the locks array because the DMutex could
+		//  already has been unlocked again by the original calling thread)
 		for ; i < N; i++ {
 			grantToBeReleased := <-ch
-			fmt.Println("To be released", grantToBeReleased.index)
+			if grantToBeReleased.locked {
+				fmt.Println("To be released", grantToBeReleased.index)
 
-			// release lock
-			go sendRelease(nodes[grantToBeReleased.index], dm.name)
+				// release lock
+				go sendRelease(nodes[grantToBeReleased.index], lockName)
+			}
 		}
 	}()
 
 	wg.Wait()
+
+	return !failed
 }
 
 // HasLock returns whether or not a node participated in granting the lock

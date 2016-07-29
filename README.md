@@ -14,9 +14,8 @@ Design goals
 * Simple design: by keeping the design simple, many tricky edge cases can be avoided.
 * No master node: there is no concept of a master node which, if this would be used and the master would be down, causes locking to come to a complete stop. (Unless you have a design with a slave node but this adds yet more complexity.)
 * Resilient: if one or more nodes go down, the other nodes should not be affected and can continue to acquire locks (provided not more than `n/2 - 1` nodes are down).
-* (REMOVE) Be able to find out which underlying nodes hold the lock for any acquired lock.
 * Automatically reconnect to (restarted) nodes.
-* Be as much as possible a drop-in replacement for `sync/mutex`.
+* Compatible with `sync/mutex` API.
 
 
 Restrictions
@@ -24,7 +23,7 @@ Restrictions
 
 * Limited scalability: up to 16 nodes.
 * Fixed configuration: changes in the number and/or network names/IP addresses need a restart of all nodes in order to take effect.
-* If a down node comes up, it will not in any way acquire the locks 
+* If a down node comes up, it will not in any way (re)acquire any locks that it may have held. 
 
 Performance
 -----------

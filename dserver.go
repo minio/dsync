@@ -5,8 +5,8 @@ import (
 	"github.com/valyala/gorpc"
 	"github.com/vburenin/nsync"
 	"log"
-	"time"
 	"strings"
+	"time"
 )
 
 func startServer(port int) {
@@ -22,15 +22,13 @@ func startServer(port int) {
 		Handler: func(clientAddr string, request interface{}) interface{} {
 			log.Printf("Obtained request %+v from the client %s\n", request, clientAddr)
 
-// 			cmd :=  // fmt.Sprintf("%+v", request)
-
 			parts := strings.Split(request.(string), "/")
 			if parts[1] == "lock" {
-				m.Lock(parts[2])
+				success := m.TryLockTimeout(parts[2], 1 * time.Second)
 
 				// lockMap["aap"] = m
 
-				return request
+				return fmt.Sprintf("%s/%v", strings.Join(parts, "/"), success)
 			} else if parts[1] == "unlock" {
 
 				m.Unlock(parts[2])
