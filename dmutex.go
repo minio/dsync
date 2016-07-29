@@ -13,8 +13,6 @@ import (
 // A DMutex is a distributed mutual exclusion lock.
 type DMutex struct {
 	name  string
-	state int32
-	sema  uint32
 	locks []bool // Array of nodes that granted a lock
 }
 
@@ -46,10 +44,8 @@ func (dm *DMutex) Lock() {
 	}
 }
 
-// lock locks dm.
+// lock tries to acquire the distributed lock, returning true or false
 //
-// If the lock is already in use, the calling goroutine
-// blocks until the mutex is available.
 func lock(locks *[N]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
@@ -75,6 +71,8 @@ func lock(locks *[N]bool, lockName string) bool {
 			if !strings.HasPrefix(resp.(string), "minio/lock/") {
 				log.Fatalf("Unexpected response from the server: %+v", resp)
 			}
+			c.Stop()
+
 			fmt.Println(resp)
 			parts := strings.Split(resp.(string), "/")
 			locked := parts[3] == "true"
@@ -114,7 +112,7 @@ func lock(locks *[N]bool, lockName string) bool {
 			}
 		}
 
-		// Signal that we have the quorum (and have acquired the lock)
+		// Signal that we have the quorum
 		wg.Done()
 
 		// Wait for the other responses and immediately release the locks
@@ -187,4 +185,5 @@ func sendRelease(node, name string) {
 	if !strings.HasPrefix(resp.(string), "minio/unlock/") {
 		log.Fatalf("Unexpected response from the server: %+v", resp)
 	}
+	c.Stop()
 }

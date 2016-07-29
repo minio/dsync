@@ -23,7 +23,8 @@ Restrictions
 
 * Limited scalability: up to 16 nodes.
 * Fixed configuration: changes in the number and/or network names/IP addresses need a restart of all nodes in order to take effect.
-* If a down node comes up, it will not in any way (re)acquire any locks that it may have held. 
+* If a down node comes up, it will not in any way (re)acquire any locks that it may have held.
+* Not designed for high performance applications such as key/value stores 
 
 Performance
 -----------
