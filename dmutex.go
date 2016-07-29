@@ -33,10 +33,10 @@ func (dm *DMutex) Lock() {
 
 	for {
 		locks := [N]bool{}
-		success := lock(locks, dm.name)
+		success := lock(&locks, dm.name)
 		if success {
 			dm.locks = make([]bool, N)
-			copy(dm.locks[:], locks[:])
+			copy(dm.locks, locks[:])
 			return
 		}
 
@@ -50,7 +50,7 @@ func (dm *DMutex) Lock() {
 //
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
-func lock(locks [N]bool, lockName string) bool {
+func lock(locks *[N]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, N/2+1)
@@ -95,36 +95,21 @@ func lock(locks [N]bool, lockName string) bool {
 		i := 0
 		for ; i < N/2+1; i++ {
 
-			select {
-			case grant := <-ch:
-			    if grant.locked {
-					fmt.Println("Participating", grant.index)
+			grant := <-ch
+			if grant.locked {
+				fmt.Println("Participating", grant.index)
 
-					// Mark that this node has acquired the lock
-					locks[grant.index] = true
-				} else {
-					failed = true
-					fmt.Println("one lock failed before quorum -- release locks acquired")
-					for lock := 0; lock < N; lock++ {
-						if locks[lock] {
-							go sendRelease(nodes[lock], lockName)
-							locks[lock] = false
-						}
-					}
-				}
-
-			case <-time.After(1000 * time.Millisecond):
+				// Mark that this node has acquired the lock
+				locks[grant.index] = true
+			} else {
 				failed = true
-				fmt.Println("timed out -- release locks acquired")
+				fmt.Println("one lock failed before quorum -- release locks acquired")
 				for lock := 0; lock < N; lock++ {
 					if locks[lock] {
 						go sendRelease(nodes[lock], lockName)
 						locks[lock] = false
 					}
 				}
-			}
-
-			if failed {
 				break
 			}
 		}

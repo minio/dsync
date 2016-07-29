@@ -51,13 +51,15 @@ func testTwoSimultaneousLocksForSameResource() {
 	dm1.Lock()
 
 	go func() {
-		time.Sleep(5 * time.Second)
+		time.Sleep(30 * time.Second)
+		fmt.Println("Unlocking dm1")
+
 		dm1.Unlock()
 	}()
 
 	dm2.Lock()
 
-	fmt.Println("We have the other lock after first is released")
+	fmt.Printf("\n\nWe have the other lock after first is released!\n")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm2.Unlock()
