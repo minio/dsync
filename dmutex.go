@@ -40,7 +40,7 @@ func (dm *DMutex) Lock() {
 
 		// We timed out on the previous lock, wait for random time,
 		// and try again afterwards
-		time.Sleep(time.Duration(/*rand.Float32() * */ 1000) * time.Millisecond)
+		time.Sleep(time.Duration(200+(rand.Float32()*800)) * time.Millisecond)
 	}
 }
 
