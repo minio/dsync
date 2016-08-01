@@ -47,6 +47,31 @@ func TestSimpleLock(t *testing.T) {
 	dm.Unlock()
 }
 
+func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
+
+	dm := DMutex{name: "test"}
+
+	dm.Lock()
+	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
+	dm.Unlock()
+
+	dm.Lock()
+	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
+	dm.Unlock()
+
+	dm.Lock()
+	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
+	dm.Unlock()
+
+	dm.Lock()
+	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
+	dm.Unlock()
+
+	dm.Lock()
+	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
+	dm.Unlock()
+}
+
 // Test two locks for same resource, one succeeds, one fails (after timeout)
 func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 
