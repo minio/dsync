@@ -185,13 +185,25 @@ func (dm *DMutex) HasLock(node string) bool {
 	return false
 }
 
+// locked returns whether or not we have met the quorum
+func (dm *DMutex) locked() bool {
+
+	locks := [N]bool{}
+	copy(locks[:], dm.locks[:])
+
+	return quorumMet(&locks)
+}
+
 // Unlock unlocks dm.
 //
 // It is a run-time error if dm is not locked on entry to Unlock.
 func (dm *DMutex) Unlock() {
 
-	// TODO: Make sure that we have the lock and panic otherwise
-	// panic("dsync: unlock of unlocked distributed mutex")
+	// Verify that we have the lock or panic otherwise (similar to sync.mutex)
+	if !dm.locked() {
+		panic("dsync: unlock of unlocked distributed mutex")
+	}
+
 
 	// TODO: Decide whether or not we want to wait until we have acknowledges from all nodes?
 
