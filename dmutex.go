@@ -1,4 +1,4 @@
-package main
+package dsync
 
 import (
 	"fmt"
@@ -26,8 +26,6 @@ type Granted struct {
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (dm *DMutex) Lock() {
-
-	rand.Seed(time.Now().UTC().UnixNano())
 
 	if dm.locked() {
 		return
@@ -177,8 +175,8 @@ func releaseAll(locks *[N]bool, lockName string) {
 
 }
 
-// HasLock returns whether or not a node participated in granting the lock
-func (dm *DMutex) HasLock(node string) bool {
+// hasLock returns whether or not a node participated in granting the lock
+func (dm *DMutex) hasLock(node string) bool {
 
 	for index, n := range nodes {
 		if n == node {

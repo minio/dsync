@@ -1,4 +1,4 @@
-package main
+package dsync
 
 import (
 	"fmt"
