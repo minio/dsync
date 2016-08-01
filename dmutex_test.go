@@ -61,6 +61,18 @@ func TestSimpleLockingTwice(t *testing.T) {
 	dm.Unlock()
 }
 
+func TestUnlockPanic(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("unlock of unlocked distributed mutex did not panic")
+		}
+	}()
+
+	mu := DMutex{name: "test"}
+	mu.Lock()
+	mu.Unlock()
+	mu.Unlock()
+}
 
 func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 
