@@ -85,32 +85,46 @@ func lock(locks *[N]bool, lockName string) bool {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	failed := false
+	quorum := false
 
 	go func() {
 
-		// Wait until we have received responses from quorum
+		// Wait until we have received (minimally) quorum number of responses or timeout
 		i := 0
-		for ; i < N/2+1; i++ {
+		done := false
 
-			grant := <-ch
-			if grant.locked {
-				fmt.Println("Participating", grant.index)
+		for ; i < N; i++ {
 
-				// Mark that this node has acquired the lock
-				locks[grant.index] = true
-			} else {
-				failed = true
-				fmt.Println("one lock failed before quorum -- release locks acquired")
-				for lock := 0; lock < N; lock++ {
-					if locks[lock] {
-						go sendRelease(nodes[lock], lockName)
-						locks[lock] = false
-					}
+			select {
+			case grant := <-ch:
+				if grant.locked {
+					fmt.Println("Participating", grant.index)
+
+					// Mark that this node has acquired the lock
+					locks[grant.index] = true
+				} else {
+					done = true
+					fmt.Println("one lock failed before quorum -- release locks acquired")
+					releaseAll(locks, lockName)
 				}
+
+			case <-time.After(50 * time.Millisecond):
+				done = true
+				// timeout happened, maybe one of the nodes is slow, count
+				// number of locks to check whether we have quorum or not
+				if !quorumMet(locks) {
+					fmt.Println("timed out -- release locks acquired")
+					releaseAll(locks, lockName)
+				}
+			}
+
+			if done {
 				break
 			}
 		}
+
+		// Count locks in order to determine whterh we have quorum or not
+		quorum = quorumMet(locks)
 
 		// Signal that we have the quorum
 		wg.Done()
@@ -131,7 +145,32 @@ func lock(locks *[N]bool, lockName string) bool {
 
 	wg.Wait()
 
-	return !failed
+	return quorum
+}
+
+// quorumMet determines whether we have acquired N/2+1 underlying locks or not
+func quorumMet(locks *[N]bool) bool {
+
+	count := 0
+	for _, locked := range locks {
+		if locked {
+			count++
+		}
+	}
+
+	return count >= N/2+1
+}
+
+// releaseAll releases all locks that are marked as locked
+func releaseAll(locks *[N]bool, lockName string) {
+
+	for lock := 0; lock < N; lock++ {
+		if locks[lock] {
+			go sendRelease(nodes[lock], lockName)
+			locks[lock] = false
+		}
+	}
+
 }
 
 // HasLock returns whether or not a node participated in granting the lock
