@@ -29,6 +29,10 @@ func (dm *DMutex) Lock() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
+	if dm.locked() {
+		return
+	}
+
 	for {
 		locks := [N]bool{}
 		success := lock(&locks, dm.name)
