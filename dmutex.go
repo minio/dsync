@@ -65,7 +65,7 @@ func lock(locks *[N]bool, lockName string) bool {
 			c.Start()
 
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
-			// i.e. it is safe to call them from multiple concurrently running goroutines.
+			// i.e. it is safe to call them from multiple concurrently running go routines.
 			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", lockName))
 			if err != nil {
 				log.Fatalf("Error when sending request to server: %s", err)
@@ -75,7 +75,6 @@ func lock(locks *[N]bool, lockName string) bool {
 			}
 			c.Stop()
 
-			fmt.Println(resp)
 			parts := strings.Split(resp.(string), "/")
 			locked := parts[3] == "true"
 
@@ -94,14 +93,13 @@ func lock(locks *[N]bool, lockName string) bool {
 		// Wait until we have received (minimally) quorum number of responses or timeout
 		i := 0
 		done := false
+		timeout := time.After(50 * time.Millisecond)
 
 		for ; i < N; i++ {
 
 			select {
 			case grant := <-ch:
 				if grant.locked {
-					fmt.Println("Participating", grant.index)
-
 					// Mark that this node has acquired the lock
 					locks[grant.index] = true
 				} else {
@@ -110,7 +108,7 @@ func lock(locks *[N]bool, lockName string) bool {
 					releaseAll(locks, lockName)
 				}
 
-			case <-time.After(50 * time.Millisecond):
+			case <-timeout:
 				done = true
 				// timeout happened, maybe one of the nodes is slow, count
 				// number of locks to check whether we have quorum or not
@@ -137,8 +135,6 @@ func lock(locks *[N]bool, lockName string) bool {
 		for ; i < N; i++ {
 			grantToBeReleased := <-ch
 			if grantToBeReleased.locked {
-				fmt.Println("To be released", grantToBeReleased.index)
-
 				// release lock
 				go sendRelease(nodes[grantToBeReleased.index], lockName)
 			}
