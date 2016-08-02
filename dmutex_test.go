@@ -79,7 +79,7 @@ func TestMain(m *testing.M) {
 
 func TestSimpleLock(t *testing.T) {
 
-	dm := DMutex{name: "test"}
+	dm := DMutex{Name: "test"}
 
 	dm.Lock()
 
@@ -91,7 +91,7 @@ func TestSimpleLock(t *testing.T) {
 
 func TestSimpleLockingTwice(t *testing.T) {
 
-	dm := DMutex{name: "test"}
+	dm := DMutex{Name: "test"}
 
 	dm.Lock()
 	dm.Lock()
@@ -110,7 +110,7 @@ func TestUnlockPanic(t *testing.T) {
 		}
 	}()
 
-	mu := DMutex{name: "test"}
+	mu := DMutex{Name: "test"}
 	mu.Lock()
 	mu.Unlock()
 	mu.Unlock()
@@ -118,7 +118,7 @@ func TestUnlockPanic(t *testing.T) {
 
 func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 
-	dm := DMutex{name: "test"}
+	dm := DMutex{Name: "test"}
 
 	dm.Lock()
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
@@ -144,8 +144,8 @@ func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 // Test two locks for same resource, one succeeds, one fails (after timeout)
 func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := DMutex{name: "aap"}
-	dm2nd := DMutex{name: "aap"}
+	dm1st := DMutex{Name: "aap"}
+	dm2nd := DMutex{Name: "aap"}
 
 	dm1st.Lock()
 
@@ -168,9 +168,9 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 // Test three locks for same resource, one succeeds, one fails (after timeout)
 func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := DMutex{name: "aap"}
-	dm2nd := DMutex{name: "aap"}
-	dm3rd := DMutex{name: "aap"}
+	dm1st := DMutex{Name: "aap"}
+	dm2nd := DMutex{Name: "aap"}
+	dm3rd := DMutex{Name: "aap"}
 
 	dm1st.Lock()
 
@@ -233,8 +233,8 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 // Test two locks for different resources, both succeed
 func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 
-	dm1 := DMutex{name: "aap"}
-	dm2 := DMutex{name: "noot"}
+	dm1 := DMutex{Name: "aap"}
+	dm2 := DMutex{Name: "noot"}
 
 	dm1.Lock()
 	dm2.Lock()

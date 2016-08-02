@@ -12,7 +12,7 @@ import (
 
 // A DMutex is a distributed mutual exclusion lock.
 type DMutex struct {
-	name  string
+	Name  string
 	locks []bool // Array of nodes that granted a lock
 }
 
@@ -33,7 +33,7 @@ func (dm *DMutex) Lock() {
 
 	for {
 		locks := make([]bool, n)
-		success := lock(&locks, dm.name)
+		success := lock(&locks, dm.Name)
 		if success {
 			dm.locks = make([]bool, n)
 			copy(dm.locks, locks[:])
@@ -209,7 +209,7 @@ func (dm *DMutex) Unlock() {
 
 		if dm.locks[index] {
 			// broadcast lock release to all nodes the granted the lock
-			go sendRelease(node, dm.name)
+			go sendRelease(node, dm.Name)
 
 			dm.locks[index] = false
 		}
