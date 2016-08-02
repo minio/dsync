@@ -206,13 +206,13 @@ func (dm *DMutex) Unlock() {
 		panic("dsync: unlock of unlocked distributed mutex")
 	}
 
-
-	// TODO: Decide whether or not we want to wait until we have acknowledges from all nodes?
-
-	// broadcast lock release to all nodes the granted the lock
+	// We don't need to wait until we have released all the locks (or the quorum)
+	// (a subsequent lock will retry automatically in case it would fail to get
+	//  quorum)
 	for index, node := range nodes {
 
 		if dm.locks[index] {
+			// broadcast lock release to all nodes the granted the lock
 			go sendRelease(node, dm.name)
 
 			dm.locks[index] = false

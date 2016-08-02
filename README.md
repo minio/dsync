@@ -42,7 +42,6 @@ Issues
 * If two nodes go down and both participated in the lock then there is a chance that a new lock will acquire locks from `n/2 + 1` nodes and will success, so we would have two concurrent locks. One way to counter this would be to monitor the network connections from the nodes that originated the lock, and, upon losing a connection to a node that granted a lock, get a new lock from a free node.  
 * When two nodes want to acquire the same lock, it is possible for both to just acquire `n` locks and there is no majority winner so both would fail (and presumably fail back to their clients?). This then requires a retry in order to acquire the lock at a later time.
 * What if late acquire response still comes in after lock has been obtained (quorum is in) and has already been released again. 
-* Do we want the lock to be re-usable or is it for one-time use only (probably the latter).
 
 Comparison to other techniques
 ------------------------------
