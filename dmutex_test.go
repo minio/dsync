@@ -6,6 +6,7 @@ import (
 	"time"
 	"testing"
 	"math/rand"
+	"sync"
 )
 
 const N = 8
@@ -121,6 +122,7 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond)
 
 	dm2nd.Unlock()
+}
 
 // Test three locks for same resource, one succeeds, one fails (after timeout)
 func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
@@ -186,4 +188,19 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 
 	wg.Wait()
 }
+
+// Test two locks for different resources, both succeed
+func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
+
+	dm1 := DMutex{name: "aap"}
+	dm2 := DMutex{name: "noot"}
+
+	dm1.Lock()
+	dm2.Lock()
+
+	fmt.Println("Both locks acquired, waiting...")
+	time.Sleep(2500 * time.Millisecond)
+
+	dm1.Unlock()
+	dm2.Unlock()
 }
