@@ -59,24 +59,26 @@ func lock(locks *[]bool, lockName string) bool {
 		go func(index int, node string) {
 
 			c := &gorpc.Client{
-				// TCP address of the server.
-				Addr: node,
+				Addr: node, // TCP address of the server.
+				LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
 			}
 			c.Start()
 
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
 			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", lockName))
-			if err != nil {
-				log.Fatalf("Error when sending request to server: %s", err)
-			}
-			if !strings.HasPrefix(resp.(string), "minio/lock/") {
-				log.Fatalf("Unexpected response from the server: %+v", resp)
+
+			locked := false
+			if err == nil {
+				if !strings.HasPrefix(resp.(string), "minio/lock/") {
+					log.Fatalf("Unexpected response from the server: %+v", resp)
+				}
+				parts := strings.Split(resp.(string), "/")
+				locked = parts[3] == "true"
+			} else {
+				// silently ignore error, retry later
 			}
 			c.Stop()
-
-			parts := strings.Split(resp.(string), "/")
-			locked := parts[3] == "true"
 
 			ch <- Granted{index: index, locked: locked}
 
@@ -220,19 +222,20 @@ func (dm *DMutex) Unlock() {
 func sendRelease(node, name string) {
 
 	c := &gorpc.Client{
-		// TCP address of the server.
-		Addr: node,
+		Addr: node, // TCP address of the server.
+		LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
 	}
 	c.Start()
 
 	// All client methods issuing RPCs are thread-safe and goroutine-safe,
 	// i.e. it is safe to call them from multiple concurrently running goroutines.
 	resp, err := c.Call(fmt.Sprintf("minio/unlock/%s", name))
-	if err != nil {
-		log.Fatalf("Error when sending request to server: %s", err)
-	}
-	if !strings.HasPrefix(resp.(string), "minio/unlock/") {
-		log.Fatalf("Unexpected response from the server: %+v", resp)
+	if err == nil {
+		if !strings.HasPrefix(resp.(string), "minio/unlock/") {
+			log.Fatalf("Unexpected response from the server: %+v", resp)
+		}
+	} else {
+		// silently ignore error
 	}
 	c.Stop()
 }
