@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/fwessels/dsync"
 	"github.com/valyala/gorpc"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"math/rand"
 )
 
 func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex) interface{}) {
@@ -47,33 +49,45 @@ func handler(clientAddr string, request interface{}, m *nsync.NamedMutex) interf
 	return request
 }
 
-func startServers() []string {
+func startServerOnPort(port int) {
 
-	nodes := make([]string, 8)
-
-	for i := 0; i < len(nodes); i++ {
-		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
-
-		go startServer(i+12345, handler)
-	}
+	go startServer(port, handler)
 
 	// Let servers start
 	time.Sleep(10 * time.Millisecond)
-
-	return nodes
 }
 
-func init() {
-
-	nodes := startServers()
-	dsync.SetNodes(nodes)
-}
+var (
+	portFlag = flag.Int("p", 0, "Port for server to listen on")
+)
 
 func main() {
 
-	dm := dsync.DMutex{}
-	dm.Lock()
-	fmt.Println("locked")
-	dm.Unlock()
-	fmt.Println("unlocked")
+	rand.Seed(time.Now().UTC().UnixNano())
+
+	flag.Parse()
+
+	if *portFlag == 0 {
+		log.Fatalf("No port number specified")
+	}
+	startServerOnPort(*portFlag)
+
+	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348"} // , "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
+	dsync.SetNodes(nodes)
+
+	dm := dsync.DMutex{Name: "chaos"}
+	for {
+		dm.Lock()
+		fmt.Println(*portFlag, "locked")
+
+		time.Sleep(10 * time.Millisecond)
+
+		dm.Unlock()
+		fmt.Println(*portFlag, "unlocked")
+	}
+
+
+	// Let release messages get out
+	time.Sleep(10 * time.Millisecond)
+
 }
