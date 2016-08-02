@@ -8,7 +8,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"math"
 )
+
+const DMutexAcquireTimeout = 25 * time.Millisecond
 
 // A DMutex is a distributed mutual exclusion lock.
 type DMutex struct {
@@ -31,6 +34,8 @@ func (dm *DMutex) Lock() {
 		return
 	}
 
+	runs, backOff := 1, 1
+
 	for {
 		locks := make([]bool, n)
 		success := lock(&locks, dm.Name)
@@ -40,9 +45,20 @@ func (dm *DMutex) Lock() {
 			return
 		}
 
-		// We timed out on the previous lock, wait for random time,
+		// We timed out on the previous lock, incrementally wait for a longer back-off time,
 		// and try again afterwards
-		time.Sleep(time.Duration(200+(rand.Float32()*800)) * time.Millisecond)
+		time.Sleep(time.Duration(backOff) * time.Millisecond)
+
+		backOff += int(rand.Float64()*math.Pow(2, float64(runs)))
+		if backOff > 1024 {
+			backOff = backOff % 64
+
+			runs = 1  // reset runs
+		} else if runs < 10 {
+			runs++
+		}
+
+		fmt.Println(backOff)
 	}
 }
 
@@ -95,7 +111,7 @@ func lock(locks *[]bool, lockName string) bool {
 		// Wait until we have received (minimally) quorum number of responses or timeout
 		i := 0
 		done := false
-		timeout := time.After(50 * time.Millisecond)
+		timeout := time.After(DMutexAcquireTimeout)
 
 		for ; i < n; i++ {
 
