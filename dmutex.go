@@ -32,10 +32,10 @@ func (dm *DMutex) Lock() {
 	}
 
 	for {
-		locks := [N]bool{}
+		locks := make([]bool, n)
 		success := lock(&locks, dm.name)
 		if success {
-			dm.locks = make([]bool, N)
+			dm.locks = make([]bool, n)
 			copy(dm.locks, locks[:])
 			return
 		}
@@ -48,10 +48,10 @@ func (dm *DMutex) Lock() {
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(locks *[N]bool, lockName string) bool {
+func lock(locks *[]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
-	ch := make(chan Granted, N/2+1)
+	ch := make(chan Granted, n/2+1)
 
 	for index, node := range nodes {
 
@@ -95,13 +95,13 @@ func lock(locks *[N]bool, lockName string) bool {
 		done := false
 		timeout := time.After(50 * time.Millisecond)
 
-		for ; i < N; i++ {
+		for ; i < n; i++ {
 
 			select {
 			case grant := <-ch:
 				if grant.locked {
 					// Mark that this node has acquired the lock
-					locks[grant.index] = true
+					(*locks)[grant.index] = true
 				} else {
 					done = true
 					fmt.Println("one lock failed before quorum -- release locks acquired")
@@ -132,7 +132,7 @@ func lock(locks *[N]bool, lockName string) bool {
 		// Wait for the other responses and immediately release the locks
 		// (do not add them to the locks array because the DMutex could
 		//  already has been unlocked again by the original calling thread)
-		for ; i < N; i++ {
+		for ; i < n; i++ {
 			grantToBeReleased := <-ch
 			if grantToBeReleased.locked {
 				// release lock
@@ -146,26 +146,26 @@ func lock(locks *[N]bool, lockName string) bool {
 	return quorum
 }
 
-// quorumMet determines whether we have acquired N/2+1 underlying locks or not
-func quorumMet(locks *[N]bool) bool {
+// quorumMet determines whether we have acquired n/2+1 underlying locks or not
+func quorumMet(locks *[]bool) bool {
 
 	count := 0
-	for _, locked := range locks {
+	for _, locked := range (*locks) {
 		if locked {
 			count++
 		}
 	}
 
-	return count >= N/2+1
+	return count >= n/2+1
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(locks *[N]bool, lockName string) {
+func releaseAll(locks *[]bool, lockName string) {
 
-	for lock := 0; lock < N; lock++ {
-		if locks[lock] {
+	for lock := 0; lock < n; lock++ {
+		if (*locks)[lock] {
 			go sendRelease(nodes[lock], lockName)
-			locks[lock] = false
+			(*locks)[lock] = false
 		}
 	}
 
@@ -186,7 +186,7 @@ func (dm *DMutex) hasLock(node string) bool {
 // locked returns whether or not we have met the quorum
 func (dm *DMutex) locked() bool {
 
-	locks := [N]bool{}
+	locks := make([]bool, n)
 	copy(locks[:], dm.locks[:])
 
 	return quorumMet(&locks)

@@ -1,22 +1,26 @@
 package dsync
 
 import (
-	"fmt"
-	"time"
+	"errors"
 )
 
-const N = 8
+var n int
+var nodes []string
 
-var nodes [N]string
+func SetNodes(nodeList []string) error {
 
-func startServers() {
-
-	for i := 0; i < N; i++ {
-		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
-
-		go startServer(i + 12345)
+	if n != 0 {
+		return errors.New("Cannot reinitialize dsync package")
+	} else if len(nodeList) < 4 {
+		return errors.New("Dsync not designed for less than 4 nodes")
+	} else if len(nodeList) > 16 {
+		return errors.New("Dsync not designed for more than 16 nodes")
 	}
 
-	// Let servers start
-	time.Sleep(10 * time.Millisecond)
+	nodes = make([]string, len(nodeList))
+	copy(nodes, nodeList[:])
+
+	n = len(nodes)
+
+	return nil
 }
