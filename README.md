@@ -48,6 +48,20 @@ Comparison to other techniques
 
 We are well aware that there are more sophisticated systems such as zookeeper, raft, etc but we found that for our limited use case this was adding too much complexity. So if `dsync` does not meet your requirements than you are probably better off using one of those systems.
 
+Performance
+-----------
+
+```
+benchmark                       old ns/op     new ns/op     delta
+BenchmarkMutexUncontended-8     4.22          1022098       +24220231.75%
+BenchmarkMutex-8                96.5          534822        +554119.69%
+BenchmarkMutexSlack-8           120           469614        +391245.00%
+BenchmarkMutexWork-8            108           443536        +410581.48%
+BenchmarkMutexWorkSlack-8       142           421151        +296485.21%
+BenchmarkMutexNoSpin-8          292           114447        +39094.18%
+BenchmarkMutexSpin-8            1163          504314        +43263.20%
+```
+
 License
 -------
 
