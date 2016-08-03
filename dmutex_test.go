@@ -107,20 +107,6 @@ func TestSimpleLock(t *testing.T) {
 	dm.Unlock()
 }
 
-func TestSimpleLockingTwice(t *testing.T) {
-
-	dm := DMutex{Name: "test"}
-
-	dm.Lock()
-	dm.Lock()
-	dm.Lock()
-
-	fmt.Println("Lock acquired, waiting...")
-	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
-
-	dm.Unlock()
-}
-
 func TestUnlockPanic(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -264,6 +250,7 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 	dm2.Unlock()
 }
 
+// Borrowed from mutex_test.go
 func HammerMutex(m *DMutex, loops int, cdone chan bool) {
 	for i := 0; i < loops; i++ {
 		m.Lock()
@@ -272,6 +259,7 @@ func HammerMutex(m *DMutex, loops int, cdone chan bool) {
 	cdone <- true
 }
 
+// Borrowed from mutex_test.go
 func TestMutex(t *testing.T) {
 	m := new(DMutex)
 	c := make(chan bool)
