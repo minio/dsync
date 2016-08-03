@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// GOMAXPROCS=10 go test
+
 package dsync
 
 import (
@@ -261,6 +263,26 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 	dm1.Unlock()
 	dm2.Unlock()
 }
+
+func HammerMutex(m *DMutex, loops int, cdone chan bool) {
+	for i := 0; i < loops; i++ {
+		m.Lock()
+		m.Unlock()
+	}
+	cdone <- true
+}
+
+func TestMutex(t *testing.T) {
+	m := new(DMutex)
+	c := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go HammerMutex(m, 1000, c)
+	}
+	for i := 0; i < 10; i++ {
+		<-c
+	}
+}
+
 
 func TestOneNodeDown(t *testing.T) {
 

@@ -32,7 +32,8 @@ const DMutexAcquireTimeout = 25 * time.Millisecond
 // A DMutex is a distributed mutual exclusion lock.
 type DMutex struct {
 	Name  string
-	locks []bool // Array of nodes that granted a lock
+	locks []bool 		// Array of nodes that granted a lock
+	m     sync.Mutex	// Mutex to prevent multiple simultaneous locks from this node
 
 	// TODO: Decide: create per object or create once for whole class
 	clnts  []*gorpc.Client
@@ -49,10 +50,12 @@ type Granted struct {
 // blocks until the mutex is available.
 func (dm *DMutex) Lock() {
 
-	if dm.locked() {
-		return
-	}
+	// Shield Lock() with local mutex in order to prevent more than
+	// one broadcast going out at the same time from this node
+	dm.m.Lock()
+	defer dm.m.Unlock()
 
+	// Create array of network clients upon first entry
 	if dm.clnts == nil {
 		dm.clnts = make([]*gorpc.Client, len(nodes))
 		for index, node := range nodes {
