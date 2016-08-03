@@ -17,6 +17,9 @@ const DMutexAcquireTimeout = 25 * time.Millisecond
 type DMutex struct {
 	Name  string
 	locks []bool // Array of nodes that granted a lock
+
+	// TODO: Decide: create per object or create once for whole class
+	clnts  []*gorpc.Client
 }
 
 type Granted struct {
@@ -34,11 +37,24 @@ func (dm *DMutex) Lock() {
 		return
 	}
 
+	if dm.clnts == nil {
+		dm.clnts = make([]*gorpc.Client, len(nodes))
+		for index, node := range nodes {
+			c := &gorpc.Client{
+				Addr: node, // TCP address of the server.
+				FlushDelay: time.Duration(-1),
+				LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
+			}
+			c.Start()
+			dm.clnts[index] = c
+		}
+	}
+	
 	runs, backOff := 1, 1
 
 	for {
 		locks := make([]bool, n)
-		success := lock(&locks, dm.Name)
+		success := lock(dm.clnts, &locks, dm.Name)
 		if success {
 			dm.locks = make([]bool, n)
 			copy(dm.locks, locks[:])
@@ -58,27 +74,21 @@ func (dm *DMutex) Lock() {
 			runs++
 		}
 
-		fmt.Println(backOff)
+		//fmt.Println(backOff)
 	}
 }
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(locks *[]bool, lockName string) bool {
+func lock(clnts []*gorpc.Client, locks *[]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, n/2+1)
 
-	for index, node := range nodes {
+	for index, c := range clnts {
 
 		// broadcast lock request to all nodes
-		go func(index int, node string) {
-
-			c := &gorpc.Client{
-				Addr: node, // TCP address of the server.
-				LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
-			}
-			c.Start()
+		go func(index int, c *gorpc.Client) {
 
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
@@ -94,11 +104,10 @@ func lock(locks *[]bool, lockName string) bool {
 			} else {
 				// silently ignore error, retry later
 			}
-			c.Stop()
 
 			ch <- Granted{index: index, locked: locked}
 
-		}(index, node)
+		}(index, c)
 	}
 
 	var wg sync.WaitGroup
@@ -122,8 +131,8 @@ func lock(locks *[]bool, lockName string) bool {
 					(*locks)[grant.index] = true
 				} else {
 					done = true
-					fmt.Println("one lock failed before quorum -- release locks acquired")
-					releaseAll(locks, lockName)
+					//fmt.Println("one lock failed before quorum -- release locks acquired")
+					releaseAll(clnts, locks, lockName)
 				}
 
 			case <-timeout:
@@ -131,8 +140,8 @@ func lock(locks *[]bool, lockName string) bool {
 				// timeout happened, maybe one of the nodes is slow, count
 				// number of locks to check whether we have quorum or not
 				if !quorumMet(locks) {
-					fmt.Println("timed out -- release locks acquired")
-					releaseAll(locks, lockName)
+					//fmt.Println("timed out -- release locks acquired")
+					releaseAll(clnts, locks, lockName)
 				}
 			}
 
@@ -154,7 +163,7 @@ func lock(locks *[]bool, lockName string) bool {
 			grantToBeReleased := <-ch
 			if grantToBeReleased.locked {
 				// release lock
-				go sendRelease(nodes[grantToBeReleased.index], lockName)
+				go sendRelease(clnts[grantToBeReleased.index], lockName)
 			}
 		}
 	}()
@@ -178,11 +187,11 @@ func quorumMet(locks *[]bool) bool {
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(locks *[]bool, lockName string) {
+func releaseAll(clnts []*gorpc.Client, locks *[]bool, lockName string) {
 
 	for lock := 0; lock < n; lock++ {
 		if (*locks)[lock] {
-			go sendRelease(nodes[lock], lockName)
+			go sendRelease(clnts[lock], lockName)
 			(*locks)[lock] = false
 		}
 	}
@@ -223,11 +232,11 @@ func (dm *DMutex) Unlock() {
 	// We don't need to wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get
 	//  quorum)
-	for index, node := range nodes {
+	for index, c := range dm.clnts {
 
 		if dm.locks[index] {
 			// broadcast lock release to all nodes the granted the lock
-			go sendRelease(node, dm.Name)
+			go sendRelease(c, dm.Name)
 
 			dm.locks[index] = false
 		}
@@ -235,13 +244,7 @@ func (dm *DMutex) Unlock() {
 }
 
 // sendRelease sends a release message to a node that previously granted a lock
-func sendRelease(node, name string) {
-
-	c := &gorpc.Client{
-		Addr: node, // TCP address of the server.
-		LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
-	}
-	c.Start()
+func sendRelease(c *gorpc.Client, name string) {
 
 	// All client methods issuing RPCs are thread-safe and goroutine-safe,
 	// i.e. it is safe to call them from multiple concurrently running goroutines.
@@ -253,5 +256,4 @@ func sendRelease(node, name string) {
 	} else {
 		// silently ignore error
 	}
-	c.Stop()
 }
