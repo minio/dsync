@@ -19,7 +19,7 @@ func startServer(port int, f func(clientAddr string, request interface{}, m *nsy
 	s := &gorpc.Server{
 		// Accept clients on this TCP address.
 		Addr: fmt.Sprintf(":%d", port),
-
+		FlushDelay: time.Duration(-1),
 		Handler: func(clientAddr string, request interface{}) interface{} {
 			// Wrap handler function to pass in state
 			return f(clientAddr, request, m)
@@ -72,18 +72,31 @@ func main() {
 	}
 	startServerOnPort(*portFlag)
 
-	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348"} // , "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
+	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348", "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
 	dsync.SetNodes(nodes)
 
 	dm := dsync.DMutex{Name: "chaos"}
-	for {
+
+	timeStart := time.Now()
+	timeLast := time.Now()
+	durationMax := float64(0.0)
+
+	for run := 1; ; run++ {
 		dm.Lock()
-		fmt.Println(*portFlag, "locked")
+
+		duration := time.Since(timeLast)
+		if durationMax < duration.Seconds() || run % 100 == 0 {
+			if durationMax < duration.Seconds() {
+				durationMax = duration.Seconds()
+			}
+			fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(timeStart).Seconds() / float64(run), "\n*****")
+		}
+		timeLast = time.Now()
+		fmt.Println(*portFlag, "locked", time.Now())
 
 		time.Sleep(10 * time.Millisecond)
 
 		dm.Unlock()
-		fmt.Println(*portFlag, "unlocked")
 	}
 
 
