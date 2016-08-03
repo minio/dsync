@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 	"math/rand"
+	"os"
+	"os/signal"
 )
 
 func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex) interface{}) {
@@ -79,6 +81,7 @@ var (
 
 func main() {
 
+
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	flag.Parse()
@@ -97,7 +100,19 @@ func main() {
 	timeLast := time.Now()
 	durationMax := float64(0.0)
 
-	for run := 1; ; run++ {
+	done := false
+
+	// Catch Ctrl-C and abort gracefully with release of locks
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func(){
+		for sig := range c {
+			fmt.Println("Ctrl-C intercepted", sig)
+			done = true
+		}
+	}()
+
+	for run := 1; !done ; run++ {
 		dm.Lock()
 
 		duration := time.Since(timeLast)
