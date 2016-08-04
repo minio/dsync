@@ -17,23 +17,31 @@
 package dsync
 
 import (
-	"sync"
 	"fmt"
+	"sync"
 )
 
+const maxReaders = 8
+
 type DRWMutex struct {
-	r1          DMutex
-	r2          DMutex
-	r1Locked    bool
-	r2Locked    bool
-	w           DMutex // held if there are pending writers
+	rArray       []*DMutex
+	rLockedArray []bool
+	w            DMutex // held if there are pending writers
 }
 
 func NewDRWMutex(name string) (drw *DRWMutex) {
+
+	rArray := make([]*DMutex, maxReaders)
+	rLockedArray := make([]bool, maxReaders)
+
+	for r := 0; r < maxReaders; r++ {
+		rArray[r] = &DMutex{Name: fmt.Sprintf("name-r%d", r)}
+	}
+
 	return &DRWMutex{
-		r1: DMutex{Name: name+"-r1"},
-		r2: DMutex{Name: name+"-r2"},
-		w: DMutex{Name: name+"-w"}}
+		rArray:       rArray,
+		rLockedArray: rLockedArray,
+		w:            DMutex{Name: name + "-w"}}
 }
 
 // RLock locks drw for reading.
@@ -43,25 +51,13 @@ func (drw *DRWMutex) RLock() {
 	drw.w.Lock()
 	drw.w.Unlock()
 
-	// Lock either R1 or R2
+	// Lock either one of the reader locks
 	for i := 0; ; i++ {
-		if i % 2 == 0 {
-			drw.r1Locked = drw.r1.TryLockTimeout()
-			if drw.r1Locked {
-				return
-			}
- 		} else {
-			drw.r2Locked = drw.r2.TryLockTimeout()
-			if drw.r2Locked {
-				return
-			}
+		drw.rLockedArray[i%maxReaders] = drw.rArray[i%maxReaders].TryLockTimeout()
+		if drw.rLockedArray[i%maxReaders] {
+			return
 		}
 	}
-
-	//if atomic.AddInt32(&rw.readerCount, 1) < 0 {
-	//	// A writer is pending, wait for it.
-	//	runtime_Semacquire(&rw.readerSem)
-	//}
 }
 
 // RUnlock undoes a single RLock call;
@@ -70,15 +66,12 @@ func (drw *DRWMutex) RLock() {
 // on entry to RUnlock.
 func (drw *DRWMutex) RUnlock() {
 
-	// Unlock either R1 or R2 (which ever was acquired)
-	if drw.r1Locked {
-		drw.r1.Unlock()
-		drw.r1Locked = false
-	}
-
-	if drw.r2Locked {
-		drw.r2.Unlock()
-		drw.r2Locked = false
+	// Unlock whichever readlock that was acquired)
+	for r := 0; r < maxReaders; r++ {
+		if drw.rLockedArray[r] {
+			drw.rArray[r].Unlock()
+			drw.rLockedArray[r] = false
+		}
 	}
 }
 
@@ -95,23 +88,15 @@ func (drw *DRWMutex) Lock() {
 
 	// Acquire all read locks.
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(maxReaders)
 
-	go func() {
-		defer wg.Done()
-		fmt.Println("Waiting for r1.Lock()")
-		drw.r1.Lock()
-		fmt.Println("Obtained r1.Lock()")
-		drw.r1Locked = true
-	}()
-
-	go func() {
-		defer wg.Done()
-		fmt.Println("Waiting for r2.Lock()")
-		drw.r2.Lock()
-		fmt.Println("Obtained r2.Lock()")
-		drw.r2Locked = true
-	}()
+	for r := 0; r < maxReaders; r++ {
+		go func(r int) {
+			defer wg.Done()
+			drw.rArray[r].Lock()
+			drw.rLockedArray[r] = true
+		}(r)
+	}
 
 	wg.Wait()
 }
@@ -124,13 +109,18 @@ func (drw *DRWMutex) Lock() {
 // arrange for another goroutine to RUnlock (Unlock) it.
 func (drw *DRWMutex) Unlock() {
 
-	// Unlock read locks
-	drw.r1.Unlock()
-	drw.r2.Unlock()
-	drw.r1Locked = false
-	drw.r2Locked = false
+	for r := 0; r < maxReaders; r++ {
+		if !drw.rLockedArray[r] {
+			panic("dsync: unlock of unlocked distributed rwmutex")
+		}
+	}
+
+	// Unlock all read locks
+	for r := 0; r < maxReaders; r++ {
+		drw.rArray[r].Unlock()
+		drw.rLockedArray[r] = false
+	}
 
 	// Allow other writers to proceed.
 	drw.w.Unlock()
 }
-
