@@ -20,15 +20,15 @@ package dsync
 
 import (
 	"fmt"
+	"github.com/valyala/gorpc"
+	"github.com/vburenin/nsync"
+	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
-	"github.com/vburenin/nsync"
-	"github.com/valyala/gorpc"
-	"strings"
-	"log"
 )
 
 func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex) interface{}) {

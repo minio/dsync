@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"github.com/valyala/gorpc"
 	"log"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
 	"time"
-	"math"
 )
 
 const DMutexAcquireTimeout = 25 * time.Millisecond
@@ -32,11 +32,11 @@ const DMutexAcquireTimeout = 25 * time.Millisecond
 // A DMutex is a distributed mutual exclusion lock.
 type DMutex struct {
 	Name  string
-	locks []bool 		// Array of nodes that granted a lock
-	m     sync.Mutex	// Mutex to prevent multiple simultaneous locks from this node
+	locks []bool     // Array of nodes that granted a lock
+	m     sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 
 	// TODO: Decide: create per object or create once for whole class
-	clnts  []*gorpc.Client
+	clnts []*gorpc.Client
 }
 
 type Granted struct {
@@ -60,9 +60,9 @@ func (dm *DMutex) Lock() {
 		dm.clnts = make([]*gorpc.Client, len(nodes))
 		for index, node := range nodes {
 			c := &gorpc.Client{
-				Addr: node, // TCP address of the server.
+				Addr:       node, // TCP address of the server.
 				FlushDelay: time.Duration(-1),
-				LogError: func(format string, args ...interface{}) { /* ignore internal error messages */ },
+				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
 			}
 			c.Start()
 			dm.clnts[index] = c
@@ -84,11 +84,11 @@ func (dm *DMutex) Lock() {
 		// and try again afterwards
 		time.Sleep(time.Duration(backOff) * time.Millisecond)
 
-		backOff += int(rand.Float64()*math.Pow(2, float64(runs)))
+		backOff += int(rand.Float64() * math.Pow(2, float64(runs)))
 		if backOff > 1024 {
 			backOff = backOff % 64
 
-			runs = 1  // reset runs
+			runs = 1 // reset runs
 		} else if runs < 10 {
 			runs++
 		}
@@ -196,7 +196,7 @@ func lock(clnts []*gorpc.Client, locks *[]bool, lockName string) bool {
 func quorumMet(locks *[]bool) bool {
 
 	count := 0
-	for _, locked := range (*locks) {
+	for _, locked := range *locks {
 		if locked {
 			count++
 		}
