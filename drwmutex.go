@@ -26,7 +26,8 @@ const maxReaders = 8
 type DRWMutex struct {
 	rArray       []*DMutex
 	rLockedArray []bool
-	w            DMutex // held if there are pending writers
+	w            DMutex     // held if there are pending writers
+	m            sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 }
 
 func NewDRWMutex(name string) (drw *DRWMutex) {
@@ -35,7 +36,7 @@ func NewDRWMutex(name string) (drw *DRWMutex) {
 	rLockedArray := make([]bool, maxReaders)
 
 	for r := 0; r < maxReaders; r++ {
-		rArray[r] = &DMutex{Name: fmt.Sprintf("name-r%d", r)}
+		rArray[r] = &DMutex{Name: fmt.Sprintf("%s-r%d", name, r)}
 	}
 
 	return &DRWMutex{
@@ -46,6 +47,9 @@ func NewDRWMutex(name string) (drw *DRWMutex) {
 
 // RLock locks drw for reading.
 func (drw *DRWMutex) RLock() {
+
+	drw.m.Lock()
+	defer drw.m.Unlock()
 
 	// Check if no write is active, block otherwise
 	drw.w.Lock()
@@ -66,11 +70,16 @@ func (drw *DRWMutex) RLock() {
 // on entry to RUnlock.
 func (drw *DRWMutex) RUnlock() {
 
+	drw.m.Lock()
+	defer drw.m.Unlock()
+
 	// Unlock whichever readlock that was acquired)
 	for r := 0; r < maxReaders; r++ {
 		if drw.rLockedArray[r] {
 			drw.rArray[r].Unlock()
 			drw.rLockedArray[r] = false
+			// we only want to release a single read lock at a time
+			break
 		}
 	}
 }
