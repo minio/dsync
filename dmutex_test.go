@@ -73,7 +73,7 @@ func startRPCServers() []string {
 			nsMap: make(map[string]struct{}),
 		})
 		// For some reason the registration paths need to be different (even for different server objs)
-		server.HandleHTTP(fmt.Sprintf("%s-%d", RpcPath, i), fmt.Sprintf("%s-%d", DebugPath, i))
+		server.HandleHTTP(fmt.Sprintf("%s-%d", RpcPath, i+12345), fmt.Sprintf("%s-%d", DebugPath, i+12345))
 		l, e := net.Listen("tcp", ":"+strconv.Itoa(i+12345))
 		if e != nil {
 			log.Fatal("listen error:", e)

@@ -23,7 +23,7 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
-	"fmt"
+	"strings"
 )
 
 const DMutexAcquireTimeout = 25 * time.Millisecond
@@ -52,7 +52,7 @@ func connectLazy(dm *DMutex) {
 	for i := range dm.clnts {
 		if dm.clnts[i] == nil {
 			// pass in unique path (as required by server.HandleHTTP()
-			dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], fmt.Sprintf("%s-%d", rpcPath, i))
+			dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], rpcPath + "-" + strings.Split(nodes[i], ":")[1])
 		}
 	}
 }
