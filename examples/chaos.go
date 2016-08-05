@@ -33,9 +33,6 @@ import (
 	"github.com/fwessels/dsync"
 )
 
-const rpcPath = "/dsync"
-const debugPath = "/debug"
-
 type Locker struct {
 	mu    sync.Mutex
 	nsMap map[string]struct{}
@@ -74,7 +71,8 @@ func startRPCServer(port int) {
 		mu:    sync.Mutex{},
 		nsMap: make(map[string]struct{}),
 	})
-	server.HandleHTTP(rpcPath, debugPath)
+	// For some reason the registration paths need to be different (even for different server objs)
+	server.HandleHTTP(fmt.Sprintf("%s-%d", dsync.RpcPath, port), fmt.Sprintf("%s-%d", dsync.DebugPath, port))
 	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if e != nil {
 		log.Fatal("listen error:", e)
@@ -93,11 +91,9 @@ func main() {
 	}
 
 	startRPCServer(*portFlag)
-	time.Sleep(2 * time.Second)
 
-	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348"}
-	//, "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
-	if err := dsync.SetNodesWithPath(nodes, rpcPath); err != nil {
+	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348", "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
+	if err := dsync.SetNodesWithPath(nodes, dsync.RpcPath); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
