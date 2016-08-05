@@ -53,13 +53,13 @@ Performance
 
 ```
 benchmark                       old ns/op     new ns/op     delta
-BenchmarkMutexUncontended-8     4.22          1022098       +24220231.75%
-BenchmarkMutex-8                96.5          534822        +554119.69%
-BenchmarkMutexSlack-8           120           469614        +391245.00%
-BenchmarkMutexWork-8            108           443536        +410581.48%
-BenchmarkMutexWorkSlack-8       142           421151        +296485.21%
-BenchmarkMutexNoSpin-8          292           114447        +39094.18%
-BenchmarkMutexSpin-8            1163          504314        +43263.20%
+BenchmarkMutexUncontended-8     4.22          1164018       +27583264.93%
+BenchmarkMutex-8                96.5          1223266       +1267533.16%
+BenchmarkMutexSlack-8           120           1192900       +993983.33%
+BenchmarkMutexWork-8            108           1239893       +1147949.07%
+BenchmarkMutexWorkSlack-8       142           1210129       +852103.52%
+BenchmarkMutexNoSpin-8          292           319479        +109310.62%
+BenchmarkMutexSpin-8            1163          1270066       +109106.02%
 ```
 
 Usage
