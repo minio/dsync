@@ -23,6 +23,7 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
+	"fmt"
 )
 
 const DMutexAcquireTimeout = 25 * time.Millisecond
@@ -50,7 +51,8 @@ func connectLazy(dm *DMutex) {
 	}
 	for i := range dm.clnts {
 		if dm.clnts[i] == nil {
-			dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], rpcPath)
+			// pass in unique path (as required by server.HandleHTTP()
+			dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], fmt.Sprintf("%s-%d", rpcPath, i))
 		}
 	}
 }
@@ -69,7 +71,7 @@ func (dm *DMutex) Lock() {
 	runs, backOff := 1, 1
 
 	for {
-		// Reconnect is still to be done
+		// TODO: Implement reconnect
 		connectLazy(dm)
 
 		// create temp arrays on stack

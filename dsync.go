@@ -21,6 +21,9 @@ import (
 	"net/rpc"
 )
 
+const RpcPath = "/dsync"
+const DebugPath = "/debug"
+
 const DefaultPath = "/rpc/dsync"
 
 var n int
@@ -31,11 +34,6 @@ func closeClients(clients []*rpc.Client) {
 	for _, clnt := range clients {
 		clnt.Close()
 	}
-}
-
-// Set nodes that are participating in distributed locking/unlocking calls.
-func SetNodes(nodeList []string) error {
-	return SetNodesWithPath(nodes, DefaultPath)
 }
 
 // Same as SetNodes, but takes a path argument different from the package-level default.

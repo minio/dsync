@@ -20,80 +20,65 @@ package dsync
 
 import (
 	"fmt"
-	"github.com/valyala/gorpc"
-	"github.com/vburenin/nsync"
 	"log"
 	"math/rand"
+	"net"
+	"net/http"
+	"net/rpc"
 	"os"
-	"strings"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
 
-func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{}) {
-
-	m := nsync.NewNamedMutex()
-	mapUID := make(map[string]uint64)
-
-	s := &gorpc.Server{
-		// Accept clients on this TCP address.
-		Addr: fmt.Sprintf(":%d", port),
-
-		Handler: func(clientAddr string, request interface{}) interface{} {
-			// Wrap handler function to pass in state
-			return f(clientAddr, request, m, mapUID)
-		},
-	}
-	if err := s.Serve(); err != nil {
-		log.Fatalf("Cannot start rpc server: %s", err)
-	}
+type Locker struct {
+	mu    sync.Mutex
+	nsMap map[string]struct{}
 }
 
-func handler(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{} {
+func (locker *Locker) Lock(args *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	if _, ok := locker.nsMap[*args]; !ok {
+		locker.nsMap[*args] = struct{}{}
+		*reply = true
+		return nil
+	}
+	*reply = false
+	return nil
+}
 
-	parts := strings.Split(request.(string), "/")
-	if parts[1] == "lock" {
-		success := m.TryLockTimeout(parts[2], 1*time.Second)
-
-		uidstr := ""
-		if success {
-			uid, ok := mapUID[parts[2]]
-			if ok {
-				uid += uint64(rand.Int63n(234))
-			} else {
-				uid = uint64(rand.Int63n(123))
-			}
-			mapUID[parts[2]] = uid
-			uidstr = fmt.Sprintf("%v", uid)
-		}
-		return fmt.Sprintf("%s/%v", strings.Join(parts, "/"), uidstr)
-	} else if parts[1] == "unlock" {
-
-		uid, ok := mapUID[parts[2]]
-		if !ok {
-			fmt.Println("unlock called on lock that is not locked", parts[2])
-		} else if parts[3] != fmt.Sprintf("%v", uid) {
-			fmt.Println("UID for release does not match: ", parts[3], fmt.Sprintf("%v", uid))
-		}
-		m.Unlock(parts[2])
-
-		return request
+func (locker *Locker) Unlock(args *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	if _, ok := locker.nsMap[*args]; !ok {
+		return fmt.Errorf("Unlock sent on un-locked entity %s", *args)
 	} else {
-		log.Println("Received unknown cmd", parts[1])
+		delete(locker.nsMap, *args)
 	}
-
-	return request
+	return nil
 }
 
-func startServers() []string {
+func startRPCServers() []string {
 
-	nodes := make([]string, 8)
+	nodes := make([]string, 4)
 
 	for i := 0; i < len(nodes); i++ {
 		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
 
-		go startServer(i+12345, handler)
+		server := rpc.NewServer()
+		server.RegisterName("Dsync", &Locker{
+			mu:    sync.Mutex{},
+			nsMap: make(map[string]struct{}),
+		})
+		// For some reason the registration paths need to be different (even for different server objs)
+		server.HandleHTTP(fmt.Sprintf("%s-%d", RpcPath, i), fmt.Sprintf("%s-%d", DebugPath, i))
+		l, e := net.Listen("tcp", ":"+strconv.Itoa(i+12345))
+		if e != nil {
+			log.Fatal("listen error:", e)
+		}
+		go http.Serve(l, nil)
 	}
 
 	// Let servers start
@@ -107,8 +92,10 @@ func TestMain(m *testing.M) {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	nodes := startServers()
-	SetNodes(nodes)
+	nodes := startRPCServers()
+	if err := SetNodesWithPath(nodes, RpcPath); err != nil {
+		log.Fatalf("set nodes failed with %v", err)
+	}
 
 	os.Exit(m.Run())
 }
