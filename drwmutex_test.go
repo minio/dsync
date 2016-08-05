@@ -20,7 +20,6 @@ package dsync
 
 import (
 	"fmt"
-	"sync/atomic"
 	"runtime"
 	"testing"
 	"time"
@@ -96,4 +95,3 @@ func TestParallelReaders(t *testing.T) {
 	doTestParallelReaders(3, 4)
 	doTestParallelReaders(4, 2)
 }
-
