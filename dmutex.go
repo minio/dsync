@@ -17,12 +17,10 @@
 package dsync
 
 import (
-	"fmt"
-	"github.com/valyala/gorpc"
 	"log"
 	"math"
 	"math/rand"
-	"strings"
+	"net/rpc"
 	"sync"
 	"time"
 )
@@ -36,12 +34,24 @@ type DMutex struct {
 	m     sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 
 	// TODO: Decide: create per object or create once for whole class
-	clnts []*gorpc.Client
+	clnts []*rpc.Client
 }
 
 type Granted struct {
 	index  int
 	locked bool
+}
+
+func connectLazy(dm *DMutex) {
+	if dm.clnts == nil {
+		dm.clnts = make([]*rpc.Client, n)
+	}
+	for i := range dm.clnts {
+		if dm.clnts[i] != nil {
+			continue
+		}
+		dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], rpcPath)
+	}
 }
 
 // Lock locks dm.
@@ -55,23 +65,10 @@ func (dm *DMutex) Lock() {
 	dm.m.Lock()
 	defer dm.m.Unlock()
 
-	// Create array of network clients upon first entry
-	if dm.clnts == nil {
-		dm.clnts = make([]*gorpc.Client, len(nodes))
-		for index, node := range nodes {
-			c := &gorpc.Client{
-				Addr:       node, // TCP address of the server.
-				FlushDelay: time.Duration(-1),
-				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
-			}
-			c.Start()
-			dm.clnts[index] = c
-		}
-	}
-
 	runs, backOff := 1, 1
 
 	for {
+		connectLazy(dm)
 		locks := make([]bool, n)
 		success := lock(dm.clnts, &locks, dm.Name)
 		if success {
@@ -99,7 +96,7 @@ func (dm *DMutex) Lock() {
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(clnts []*gorpc.Client, locks *[]bool, lockName string) bool {
+func lock(clnts []*rpc.Client, locks *[]bool, lockName string) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, n/2+1)
@@ -107,19 +104,15 @@ func lock(clnts []*gorpc.Client, locks *[]bool, lockName string) bool {
 	for index, c := range clnts {
 
 		// broadcast lock request to all nodes
-		go func(index int, c *gorpc.Client) {
-
+		go func(index int, c *rpc.Client) {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
-			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", lockName))
+			var status bool
+			err := c.Call("Dsync.Lock", lockName, &status)
 
 			locked := false
 			if err == nil {
-				if !strings.HasPrefix(resp.(string), "minio/lock/") {
-					log.Fatalf("Unexpected response from the server: %+v", resp)
-				}
-				parts := strings.Split(resp.(string), "/")
-				locked = parts[3] == "true"
+				locked = status
 			} else {
 				// silently ignore error, retry later
 			}
@@ -206,7 +199,7 @@ func quorumMet(locks *[]bool) bool {
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(clnts []*gorpc.Client, locks *[]bool, lockName string) {
+func releaseAll(clnts []*rpc.Client, locks *[]bool, lockName string) {
 
 	for lock := 0; lock < n; lock++ {
 		if (*locks)[lock] {
@@ -263,16 +256,12 @@ func (dm *DMutex) Unlock() {
 }
 
 // sendRelease sends a release message to a node that previously granted a lock
-func sendRelease(c *gorpc.Client, name string) {
+func sendRelease(c *rpc.Client, name string) {
 
 	// All client methods issuing RPCs are thread-safe and goroutine-safe,
 	// i.e. it is safe to call them from multiple concurrently running goroutines.
-	resp, err := c.Call(fmt.Sprintf("minio/unlock/%s", name))
-	if err == nil {
-		if !strings.HasPrefix(resp.(string), "minio/unlock/") {
-			log.Fatalf("Unexpected response from the server: %+v", resp)
-		}
-	} else {
-		// silently ignore error
+	var status bool
+	if err := c.Call("Dsync.Unlock", name, &status); err != nil {
+		log.Fatal("Unlock on %s failed on client %v", name, c)
 	}
 }
