@@ -30,17 +30,18 @@ import (
 	"os/signal"
 )
 
-func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex) interface{}) {
+func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{}) {
 
 	m := nsync.NewNamedMutex()
+	mapUID := make(map[string]uint64)
 
 	s := &gorpc.Server{
 		// Accept clients on this TCP address.
 		Addr: fmt.Sprintf(":%d", port),
-		FlushDelay: time.Duration(-1),
+
 		Handler: func(clientAddr string, request interface{}) interface{} {
 			// Wrap handler function to pass in state
-			return f(clientAddr, request, m)
+			return f(clientAddr, request, m, mapUID)
 		},
 	}
 	if err := s.Serve(); err != nil {
@@ -48,15 +49,32 @@ func startServer(port int, f func(clientAddr string, request interface{}, m *nsy
 	}
 }
 
-func handler(clientAddr string, request interface{}, m *nsync.NamedMutex) interface{} {
+func handler(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{} {
 
 	parts := strings.Split(request.(string), "/")
 	if parts[1] == "lock" {
 		success := m.TryLockTimeout(parts[2], 1*time.Second)
 
-		return fmt.Sprintf("%s/%v", strings.Join(parts, "/"), success)
+		uidstr := ""
+		if success {
+			uid, ok := mapUID[parts[2]]
+			if ok {
+				uid += uint64(rand.Int63n(234))
+			} else {
+				uid = uint64(rand.Int63n(123))
+			}
+			mapUID[parts[2]] = uid
+			uidstr = fmt.Sprintf("%v", uid)
+		}
+		return fmt.Sprintf("%s/%v", strings.Join(parts, "/"), uidstr)
 	} else if parts[1] == "unlock" {
 
+		uid, ok := mapUID[parts[2]]
+		if !ok {
+			fmt.Println("unlock called on lock that is not locked", parts[2])
+		} else if parts[3] != fmt.Sprintf("%v", uid) {
+			fmt.Println("UID for release does not match: ", parts[3], fmt.Sprintf("%v", uid))
+		}
 		m.Unlock(parts[2])
 
 		return request
@@ -80,7 +98,6 @@ var (
 )
 
 func main() {
-
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
@@ -130,8 +147,6 @@ func main() {
 		dm.Unlock()
 	}
 
-
 	// Let release messages get out
-	time.Sleep(10 * time.Millisecond)
-
+	time.Sleep(100 * time.Millisecond)
 }
