@@ -18,13 +18,30 @@ package dsync
 
 import (
 	"errors"
+	"net/rpc"
 )
+
+const DefaultPath = "/rpc/dsync"
 
 var n int
 var nodes []string
+var rpcPath string
 
+func closeClients(clients []*rpc.Client) {
+	for _, clnt := range clients {
+		clnt.Close()
+	}
+}
+
+// Set nodes that are participating in distributed locking/unlocking calls.
 func SetNodes(nodeList []string) error {
+	return SetNodesWithPath(nodes, DefaultPath)
+}
 
+// Same as SetNodes, but takes a path argument different from the package-level default.
+func SetNodesWithPath(nodeList []string, path string) (err error) {
+
+	// Validate if number of nodes is within allowable range.
 	if n != 0 {
 		return errors.New("Cannot reinitialize dsync package")
 	} else if len(nodeList) < 4 {
@@ -35,8 +52,7 @@ func SetNodes(nodeList []string) error {
 
 	nodes = make([]string, len(nodeList))
 	copy(nodes, nodeList[:])
-
+	rpcPath = path
 	n = len(nodes)
-
 	return nil
 }

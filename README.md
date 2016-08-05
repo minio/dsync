@@ -62,6 +62,14 @@ BenchmarkMutexNoSpin-8          292           114447        +39094.18%
 BenchmarkMutexSpin-8            1163          504314        +43263.20%
 ```
 
+Usage
+-----
+
+Explain usage
+```
+```
+
+
 License
 -------
 

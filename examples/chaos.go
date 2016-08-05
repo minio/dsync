@@ -19,83 +19,68 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/fwessels/dsync"
-	"github.com/valyala/gorpc"
-	"github.com/vburenin/nsync"
 	"log"
-	"strings"
-	"time"
 	"math/rand"
+	"net"
+	"net/http"
+	"net/rpc"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/fwessels/dsync"
 )
 
-func startServer(port int, f func(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{}) {
+const rpcPath = "/dsync"
+const debugPath = "/debug"
 
-	m := nsync.NewNamedMutex()
-	mapUID := make(map[string]uint64)
-
-	s := &gorpc.Server{
-		// Accept clients on this TCP address.
-		Addr: fmt.Sprintf(":%d", port),
-
-		Handler: func(clientAddr string, request interface{}) interface{} {
-			// Wrap handler function to pass in state
-			return f(clientAddr, request, m, mapUID)
-		},
-	}
-	if err := s.Serve(); err != nil {
-		log.Fatalf("Cannot start rpc server: %s", err)
-	}
+type Locker struct {
+	mu    sync.Mutex
+	nsMap map[string]struct{}
 }
 
-func handler(clientAddr string, request interface{}, m *nsync.NamedMutex, mapUID map[string]uint64) interface{} {
+func (locker *Locker) Lock(args *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	if _, ok := locker.nsMap[*args]; !ok {
+		locker.nsMap[*args] = struct{}{}
+		*reply = true
+		return nil
+	}
+	*reply = false
+	return nil
+}
 
-	parts := strings.Split(request.(string), "/")
-	if parts[1] == "lock" {
-		success := m.TryLockTimeout(parts[2], 1*time.Second)
-
-		uidstr := ""
-		if success {
-			uid, ok := mapUID[parts[2]]
-			if ok {
-				uid += uint64(rand.Int63n(234))
-			} else {
-				uid = uint64(rand.Int63n(123))
-			}
-			mapUID[parts[2]] = uid
-			uidstr = fmt.Sprintf("%v", uid)
-		}
-		return fmt.Sprintf("%s/%v", strings.Join(parts, "/"), uidstr)
-	} else if parts[1] == "unlock" {
-
-		uid, ok := mapUID[parts[2]]
-		if !ok {
-			fmt.Println("unlock called on lock that is not locked", parts[2])
-		} else if parts[3] != fmt.Sprintf("%v", uid) {
-			fmt.Println("UID for release does not match: ", parts[3], fmt.Sprintf("%v", uid))
-		}
-		m.Unlock(parts[2])
-
-		return request
+func (locker *Locker) Unlock(args *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	if _, ok := locker.nsMap[*args]; !ok {
+		return fmt.Errorf("Unlock sent on un-locked entity %s", *args)
 	} else {
-		log.Println("Received unknown cmd", parts[1])
+		delete(locker.nsMap, *args)
 	}
-
-	return request
-}
-
-func startServerOnPort(port int) {
-
-	go startServer(port, handler)
-
-	// Let servers start
-	time.Sleep(10 * time.Millisecond)
+	return nil
 }
 
 var (
 	portFlag = flag.Int("p", 0, "Port for server to listen on")
 )
+
+func startRPCServer(port int) {
+	server := rpc.NewServer()
+	server.RegisterName("Dsync", &Locker{
+		mu:    sync.Mutex{},
+		nsMap: make(map[string]struct{}),
+	})
+	server.HandleHTTP(rpcPath, debugPath)
+	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	go http.Serve(l, nil)
+}
 
 func main() {
 
@@ -106,10 +91,15 @@ func main() {
 	if *portFlag == 0 {
 		log.Fatalf("No port number specified")
 	}
-	startServerOnPort(*portFlag)
 
-	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348", "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
-	dsync.SetNodes(nodes)
+	startRPCServer(*portFlag)
+	time.Sleep(2 * time.Second)
+
+	nodes := []string{"127.0.0.1:12345", "127.0.0.1:12346", "127.0.0.1:12347", "127.0.0.1:12348"}
+	//, "127.0.0.1:12349", "127.0.0.1:12350", "127.0.0.1:12351", "127.0.0.1:12352"}
+	if err := dsync.SetNodesWithPath(nodes, rpcPath); err != nil {
+		log.Fatalf("set nodes failed with %v", err)
+	}
 
 	dm := dsync.DMutex{Name: "chaos"}
 
@@ -122,22 +112,22 @@ func main() {
 	// Catch Ctrl-C and abort gracefully with release of locks
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-	go func(){
+	go func() {
 		for sig := range c {
 			fmt.Println("Ctrl-C intercepted", sig)
 			done = true
 		}
 	}()
 
-	for run := 1; !done ; run++ {
+	for run := 1; !done; run++ {
 		dm.Lock()
 
 		duration := time.Since(timeLast)
-		if durationMax < duration.Seconds() || run % 100 == 0 {
+		if durationMax < duration.Seconds() || run%100 == 0 {
 			if durationMax < duration.Seconds() {
 				durationMax = duration.Seconds()
 			}
-			fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(timeStart).Seconds() / float64(run), "\n*****")
+			fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(timeStart).Seconds()/float64(run), "\n*****")
 		}
 		timeLast = time.Now()
 		fmt.Println(*portFlag, "locked", time.Now())

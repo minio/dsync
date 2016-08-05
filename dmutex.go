@@ -17,12 +17,10 @@
 package dsync
 
 import (
-	"fmt"
-	"github.com/valyala/gorpc"
 	"log"
 	"math"
 	"math/rand"
-	"strings"
+	"net/rpc"
 	"sync"
 	"time"
 )
@@ -37,13 +35,24 @@ type DMutex struct {
 	m     sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 
 	// TODO: Decide: create per object or create once for whole class
-	clnts []*gorpc.Client
+	clnts []*rpc.Client
 }
 
 type Granted struct {
 	index  int
 	locked bool
 	uid    string
+}
+
+func connectLazy(dm *DMutex) {
+	if dm.clnts == nil {
+		dm.clnts = make([]*rpc.Client, n)
+	}
+	for i := range dm.clnts {
+		if dm.clnts[i] == nil {
+			dm.clnts[i], _ = rpc.DialHTTPPath("tcp", nodes[i], rpcPath)
+		}
+	}
 }
 
 // Lock locks dm.
@@ -57,23 +66,12 @@ func (dm *DMutex) Lock() {
 	dm.m.Lock()
 	defer dm.m.Unlock()
 
-	// Create array of network clients upon first entry
-	if dm.clnts == nil {
-		dm.clnts = make([]*gorpc.Client, len(nodes))
-		for index, node := range nodes {
-			c := &gorpc.Client{
-				Addr:       node, // TCP address of the server.
-				FlushDelay: time.Duration(-1),
-				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
-			}
-			c.Start()
-			dm.clnts[index] = c
-		}
-	}
-
 	runs, backOff := 1, 1
 
 	for {
+		// Reconnect is still to be done
+		connectLazy(dm)
+
 		// create temp arrays on stack
 		locks := make([]bool, n)
 		ids := make([]string, n)
@@ -104,68 +102,67 @@ func (dm *DMutex) Lock() {
 	}
 }
 
-func (dm *DMutex) TryLockTimeout() bool {
-
-	// Shield Lock() with local mutex in order to prevent more than
-	// one broadcast going out at the same time from this node
-	dm.m.Lock()
-	defer dm.m.Unlock()
-
-	// Create array of network clients upon first entry
-	if dm.clnts == nil {
-		dm.clnts = make([]*gorpc.Client, len(nodes))
-		for index, node := range nodes {
-			c := &gorpc.Client{
-				Addr:       node, // TCP address of the server.
-				FlushDelay: time.Duration(-1),
-				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
-			}
-			c.Start()
-			dm.clnts[index] = c
-		}
-	}
-
-	// create temp arrays on stack
-	locks := make([]bool, n)
-	ids := make([]string, n)
-
-	// try to acquire the lock
-	success := lock(dm.clnts, &locks, &ids, dm.Name)
-	if success {
-		// if success, copy array to object
-		dm.locks = make([]bool, n)
-		copy(dm.locks, locks[:])
-		dm.uids = make([]string, n)
-		copy(dm.uids, ids[:])
-	}
-	return success
-}
+//func (dm *DMutex) TryLockTimeout() bool {
+//
+//	// Shield Lock() with local mutex in order to prevent more than
+//	// one broadcast going out at the same time from this node
+//	dm.m.Lock()
+//	defer dm.m.Unlock()
+//
+//	// Create array of network clients upon first entry
+//	if dm.clnts == nil {
+//		dm.clnts = make([]*gorpc.Client, len(nodes))
+//		for index, node := range nodes {
+//			c := &gorpc.Client{
+//				Addr:       node, // TCP address of the server.
+//				FlushDelay: time.Duration(-1),
+//				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
+//			}
+//			c.Start()
+//			dm.clnts[index] = c
+//		}
+//	}
+//
+//	// create temp arrays on stack
+//	locks := make([]bool, n)
+//	ids := make([]string, n)
+//
+//	// try to acquire the lock
+//	success := lock(dm.clnts, &locks, &ids, dm.Name)
+//	if success {
+//		// if success, copy array to object
+//		dm.locks = make([]bool, n)
+//		copy(dm.locks, locks[:])
+//		dm.uids = make([]string, n)
+//		copy(dm.uids, ids[:])
+//	}
+//	return success
+//}
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(clnts []*gorpc.Client, locks *[]bool, uids *[]string, lockName string) bool {
+func lock(clnts []*rpc.Client, locks *[]bool, uids *[]string, lockName string) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, n/2+1)
 
 	for index, c := range clnts {
 
+		if c == nil {
+			continue
+		}
 		// broadcast lock request to all nodes
-		go func(index int, c *gorpc.Client) {
-
+		go func(index int, c *rpc.Client) {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
-			resp, err := c.Call(fmt.Sprintf("minio/lock/%s", lockName))
+			var status bool
+			err := c.Call("Dsync.Lock", lockName, &status)
 
 			locked, uid := false, ""
 			if err == nil {
-				if !strings.HasPrefix(resp.(string), "minio/lock/") {
-					log.Fatalf("Unexpected response from the server: %+v", resp)
-				}
-				parts := strings.Split(resp.(string), "/")
-				locked = len(parts[3]) > 0 // we have an ID
-				uid = parts[3]             // save UID for passing out
-
+				locked = status
+				// TODO: Get UIOD again
+				uid = ""
 			} else {
 				// silently ignore error, retry later
 			}
@@ -253,7 +250,7 @@ func quorumMet(locks *[]bool) bool {
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(clnts []*gorpc.Client, locks *[]bool, ids *[]string, lockName string) {
+func releaseAll(clnts []*rpc.Client, locks *[]bool, ids *[]string, lockName string) {
 
 	for lock := 0; lock < n; lock++ {
 		if (*locks)[lock] {
@@ -311,16 +308,13 @@ func (dm *DMutex) Unlock() {
 }
 
 // sendRelease sends a release message to a node that previously granted a lock
-func sendRelease(c *gorpc.Client, name, id string) {
+func sendRelease(c *rpc.Client, name, uid string) {
 
 	// All client methods issuing RPCs are thread-safe and goroutine-safe,
 	// i.e. it is safe to call them from multiple concurrently running goroutines.
-	resp, err := c.Call(fmt.Sprintf("minio/unlock/%s/%s", name, id))
-	if err == nil {
-		if !strings.HasPrefix(resp.(string), "minio/unlock/") {
-			log.Fatalf("Unexpected response from the server: %+v", resp)
-		}
-	} else {
-		// silently ignore error
+	var status bool
+	// TODO: Send UID to server
+	if err := c.Call("Dsync.Unlock", name, &status); err != nil {
+		log.Fatal("Unlock on %s failed on client %v", name, c)
 	}
 }
