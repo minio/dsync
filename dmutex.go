@@ -104,42 +104,32 @@ func (dm *DMutex) Lock() {
 	}
 }
 
-//func (dm *DMutex) TryLockTimeout() bool {
-//
-//	// Shield Lock() with local mutex in order to prevent more than
-//	// one broadcast going out at the same time from this node
-//	dm.m.Lock()
-//	defer dm.m.Unlock()
-//
-//	// Create array of network clients upon first entry
-//	if dm.clnts == nil {
-//		dm.clnts = make([]*gorpc.Client, len(nodes))
-//		for index, node := range nodes {
-//			c := &gorpc.Client{
-//				Addr:       node, // TCP address of the server.
-//				FlushDelay: time.Duration(-1),
-//				LogError:   func(format string, args ...interface{}) { /* ignore internal error messages */ },
-//			}
-//			c.Start()
-//			dm.clnts[index] = c
-//		}
-//	}
-//
-//	// create temp arrays on stack
-//	locks := make([]bool, n)
-//	ids := make([]string, n)
-//
-//	// try to acquire the lock
-//	success := lock(dm.clnts, &locks, &ids, dm.Name)
-//	if success {
-//		// if success, copy array to object
-//		dm.locks = make([]bool, n)
-//		copy(dm.locks, locks[:])
-//		dm.uids = make([]string, n)
-//		copy(dm.uids, ids[:])
-//	}
-//	return success
-//}
+func (dm *DMutex) tryLockTimeout() bool {
+
+	// Shield Lock() with local mutex in order to prevent more than
+	// one broadcast going out at the same time from this node
+	dm.m.Lock()
+	defer dm.m.Unlock()
+
+	// TODO: Implement reconnect
+	connectLazy(dm)
+
+	// create temp arrays on stack
+	locks := make([]bool, n)
+	ids := make([]string, n)
+
+	// try to acquire the lock
+	success := lock(dm.clnts, &locks, &ids, dm.Name)
+	if success {
+		// if success, copy array to object
+		dm.locks = make([]bool, n)
+		copy(dm.locks, locks[:])
+		dm.uids = make([]string, n)
+		copy(dm.uids, ids[:])
+	}
+	return success
+}
+
 
 // lock tries to acquire the distributed lock, returning true or false
 //
