@@ -60,20 +60,16 @@ func (locker *Locker) Unlock(args *string, reply *bool) error {
 	return nil
 }
 
-func startRPCServers() []string {
+func startRPCServers(nodes []string) {
 
-	nodes := make([]string, 4)
-
-	for i := 0; i < len(nodes); i++ {
-		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
-
+	for i := range nodes {
 		server := rpc.NewServer()
 		server.RegisterName("Dsync", &Locker{
 			mu:    sync.Mutex{},
 			nsMap: make(map[string]struct{}),
 		})
 		// For some reason the registration paths need to be different (even for different server objs)
-		server.HandleHTTP(fmt.Sprintf("%s-%d", RpcPath, i+12345), fmt.Sprintf("%s-%d", DebugPath, i+12345))
+		server.HandleHTTP(rpcPaths[i], fmt.Sprintf("%s-debug", rpcPaths[i]))
 		l, e := net.Listen("tcp", ":"+strconv.Itoa(i+12345))
 		if e != nil {
 			log.Fatal("listen error:", e)
@@ -83,8 +79,6 @@ func startRPCServers() []string {
 
 	// Let servers start
 	time.Sleep(10 * time.Millisecond)
-
-	return nodes
 }
 
 // TestMain initializes the testing framework
@@ -92,10 +86,18 @@ func TestMain(m *testing.M) {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	nodes := startRPCServers()
-	if err := SetNodesWithPath(nodes, RpcPath); err != nil {
+	nodes := make([]string, 4)
+	for i := range nodes {
+		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
+	}
+	var rpcPaths []string
+	for i := range nodes {
+		rpcPaths = append(rpcPaths, RpcPath+"-"+strconv.Itoa(i))
+	}
+	if err := SetNodesWithPath(nodes, rpcPaths); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
+	startRPCServers(nodes)
 
 	os.Exit(m.Run())
 }
