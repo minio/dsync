@@ -20,7 +20,6 @@ package dsync
 
 import (
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -56,42 +55,4 @@ func TestSimpleWriteLock(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond)
 
 	drwm_w.Unlock()
-}
-
-func parallelReader(m *DRWMutex, clocked, cunlock, cdone chan bool) {
-	m.RLock()
-	clocked <- true
-	<-cunlock
-	m.RUnlock()
-	cdone <- true
-}
-
-func doTestParallelReaders(numReaders, gomaxprocs int) {
-	runtime.GOMAXPROCS(gomaxprocs)
-	m := NewDRWMutex("test-parallel")
-
-	clocked := make(chan bool)
-	cunlock := make(chan bool)
-	cdone := make(chan bool)
-	for i := 0; i < numReaders; i++ {
-		go parallelReader(m, clocked, cunlock, cdone)
-	}
-	// Wait for all parallel RLock()s to succeed.
-	for i := 0; i < numReaders; i++ {
-		<-clocked
-	}
-	for i := 0; i < numReaders; i++ {
-		cunlock <- true
-	}
-	// Wait for the goroutines to finish.
-	for i := 0; i < numReaders; i++ {
-		<-cdone
-	}
-}
-
-func TestParallelReaders(t *testing.T) {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(-1))
-	doTestParallelReaders(1, 4)
-	doTestParallelReaders(3, 4)
-	doTestParallelReaders(4, 2)
 }
