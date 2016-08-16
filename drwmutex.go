@@ -44,8 +44,8 @@ type Granted struct {
 func NewDRWMutex(name string) *DRWMutex {
 	return &DRWMutex{
 		Name:  name,
-		locks: make([]bool, n),
-		uids:  make([]string, n),
+		locks: make([]bool, dnodeCount),
+		uids:  make([]string, dnodeCount),
 	}
 }
 
@@ -87,8 +87,8 @@ func (dm *DRWMutex) RLock() {
 		connectLazy(dm)
 
 		// create temp arrays on stack
-		locks := make([]bool, n)
-		ids := make([]string, n)
+		locks := make([]bool, dnodeCount)
+		ids := make([]string, dnodeCount)
 
 		// try to acquire the lock
 		isReadLock := true
@@ -132,8 +132,8 @@ func (dm *DRWMutex) Lock() {
 		connectLazy(dm)
 
 		// create temp arrays on stack
-		locks := make([]bool, n)
-		ids := make([]string, n)
+		locks := make([]bool, dnodeCount)
+		ids := make([]string, dnodeCount)
 
 		// try to acquire the lock
 		isReadLock := false
@@ -165,7 +165,7 @@ func (dm *DRWMutex) Lock() {
 func lock(clnts []*RPCClient, locks *[]bool, uids *[]string, lockName string, isReadLock bool) bool {
 
 	// Create buffered channel of quorum size
-	ch := make(chan Granted, n/2+1)
+	ch := make(chan Granted, dquorum)
 
 	for index, c := range clnts {
 
@@ -212,7 +212,7 @@ func lock(clnts []*RPCClient, locks *[]bool, uids *[]string, lockName string, is
 		done := false
 		timeout := time.After(DRWMutexAcquireTimeout)
 
-		for ; i < n; i++ {
+		for ; i < dnodeCount; i++ {
 
 			select {
 			case grant := <-ch:
@@ -250,7 +250,7 @@ func lock(clnts []*RPCClient, locks *[]bool, uids *[]string, lockName string, is
 		// Wait for the other responses and immediately release the locks
 		// (do not add them to the locks array because the DRWMutex could
 		//  already has been unlocked again by the original calling thread)
-		for ; i < n; i++ {
+		for ; i < dnodeCount; i++ {
 			grantToBeReleased := <-ch
 			if grantToBeReleased.locked {
 				// release lock
@@ -274,13 +274,13 @@ func quorumMet(locks *[]bool) bool {
 		}
 	}
 
-	return count >= n/2+1
+	return count >= dquorum
 }
 
 // releaseAll releases all locks that are marked as locked
 func releaseAll(clnts []*RPCClient, locks *[]bool, ids *[]string, lockName string, isReadLock bool) {
 
-	for lock := 0; lock < n; lock++ {
+	for lock := 0; lock < dnodeCount; lock++ {
 		if (*locks)[lock] {
 			go sendRelease(clnts[lock], lockName, (*ids)[lock], isReadLock)
 			(*locks)[lock] = false
@@ -305,7 +305,7 @@ func (dm *DRWMutex) hasLock(node string) bool {
 // locked returns whether or not we have met the quorum
 func (dm *DRWMutex) locked() bool {
 
-	locks := make([]bool, n)
+	locks := make([]bool, dnodeCount)
 	copy(locks[:], dm.locks[:])
 
 	return quorumMet(&locks)
