@@ -32,31 +32,82 @@ import (
 	"time"
 )
 
+const N = 4 // number of lock servers for tests.
 type Locker struct {
-	mu    sync.Mutex
-	nsMap map[string]struct{}
+	mu sync.Mutex
+	// e.g, when a Lock(name) is held, map[string][]bool{"name" : []bool{true}}
+	// when one or more RLock() is held, map[string][]bool{"name" : []bool{false, false}}
+	nsMap map[string][]bool
 }
 
-func (locker *Locker) Lock(args *string, reply *bool) error {
+func (locker *Locker) Lock(name *string, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	if _, ok := locker.nsMap[*args]; !ok {
-		locker.nsMap[*args] = struct{}{}
+	_, ok := locker.nsMap[*name]
+	if !ok {
 		*reply = true
+		locker.nsMap[*name] = []bool{true}
 		return nil
 	}
 	*reply = false
 	return nil
 }
 
-func (locker *Locker) Unlock(args *string, reply *bool) error {
+func (locker *Locker) Unlock(name *string, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	if _, ok := locker.nsMap[*args]; !ok {
-		return fmt.Errorf("Unlock sent on un-locked entity %s", *args)
-	} else {
-		delete(locker.nsMap, *args)
+	_, ok := locker.nsMap[*name]
+	if !ok {
+		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", *name)
 	}
+	*reply = true
+	delete(locker.nsMap, *name)
+	return nil
+}
+
+func (locker *Locker) RLock(name *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	defer func() {
+		fmt.Printf("rlock: *reply = %+v\n", *reply)
+	}()
+	locksHeld, ok := locker.nsMap[*name]
+	if !ok {
+		// First read-lock to be held on *name.
+		locker.nsMap[*name] = []bool{false}
+	} else {
+		// Add an entry for this read lock.
+		if len(locker.nsMap[*name]) == 1 && locker.nsMap[*name][0] == true {
+			*reply = false
+			return nil
+		}
+		locker.nsMap[*name] = append(locksHeld, false)
+	}
+	*reply = true
+
+	return nil
+}
+
+func (locker *Locker) RUnlock(name *string, reply *bool) error {
+	locker.mu.Lock()
+	defer locker.mu.Unlock()
+	defer func() {
+		fmt.Printf("runlock: *reply = %+v\n", *reply)
+	}()
+	locksHeld, ok := locker.nsMap[*name]
+	if !ok {
+		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", *name)
+	}
+	if len(locksHeld) > 1 {
+		// Remove one of the read locks held.
+		locksHeld = locksHeld[1:]
+		locker.nsMap[*name] = locksHeld
+	} else {
+		// Delete the map entry since this is the last read lock held
+		// on *name.
+		delete(locker.nsMap, *name)
+	}
+	*reply = true
 	return nil
 }
 
@@ -66,7 +117,7 @@ func startRPCServers(nodes []string) {
 		server := rpc.NewServer()
 		server.RegisterName("Dsync", &Locker{
 			mu:    sync.Mutex{},
-			nsMap: make(map[string]struct{}),
+			nsMap: make(map[string][]bool),
 		})
 		// For some reason the registration paths need to be different (even for different server objs)
 		server.HandleHTTP(rpcPaths[i], fmt.Sprintf("%s-debug", rpcPaths[i]))
@@ -104,7 +155,7 @@ func TestMain(m *testing.M) {
 
 func TestSimpleLock(t *testing.T) {
 
-	dm := DMutex{Name: "test"}
+	dm := NewDRWMutex("test")
 
 	dm.Lock()
 
@@ -121,7 +172,7 @@ func TestUnlockPanic(t *testing.T) {
 		}
 	}()
 
-	mu := DMutex{Name: "test"}
+	mu := NewDRWMutex("test")
 	mu.Lock()
 	mu.Unlock()
 	mu.Unlock()
@@ -129,7 +180,7 @@ func TestUnlockPanic(t *testing.T) {
 
 func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 
-	dm := DMutex{Name: "test"}
+	dm := NewDRWMutex("test")
 
 	dm.Lock()
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
@@ -155,8 +206,8 @@ func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 // Test two locks for same resource, one succeeds, one fails (after timeout)
 func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := DMutex{Name: "aap"}
-	dm2nd := DMutex{Name: "aap"}
+	dm1st := NewDRWMutex("aap")
+	dm2nd := NewDRWMutex("aap")
 
 	dm1st.Lock()
 
@@ -179,9 +230,9 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 // Test three locks for same resource, one succeeds, one fails (after timeout)
 func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := DMutex{Name: "aap"}
-	dm2nd := DMutex{Name: "aap"}
-	dm3rd := DMutex{Name: "aap"}
+	dm1st := NewDRWMutex("aap")
+	dm2nd := NewDRWMutex("aap")
+	dm3rd := NewDRWMutex("aap")
 
 	dm1st.Lock()
 
@@ -244,8 +295,8 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 // Test two locks for different resources, both succeed
 func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 
-	dm1 := DMutex{Name: "aap"}
-	dm2 := DMutex{Name: "noot"}
+	dm1 := NewDRWMutex("aap")
+	dm2 := NewDRWMutex("noot")
 
 	dm1.Lock()
 	dm2.Lock()
@@ -260,7 +311,7 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 }
 
 // Borrowed from mutex_test.go
-func HammerMutex(m *DMutex, loops int, cdone chan bool) {
+func HammerMutex(m *DRWMutex, loops int, cdone chan bool) {
 	for i := 0; i < loops; i++ {
 		m.Lock()
 		m.Unlock()
@@ -270,7 +321,7 @@ func HammerMutex(m *DMutex, loops int, cdone chan bool) {
 
 // Borrowed from mutex_test.go
 func TestMutex(t *testing.T) {
-	m := new(DMutex)
+	m := NewDRWMutex("")
 	c := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go HammerMutex(m, 1000, c)
@@ -282,11 +333,13 @@ func TestMutex(t *testing.T) {
 
 func BenchmarkMutexUncontended(b *testing.B) {
 	type PaddedMutex struct {
-		DMutex
+		DRWMutex
 		pad [128]uint8
 	}
 	b.RunParallel(func(pb *testing.PB) {
 		var mu PaddedMutex
+		mu.locks = make([]bool, N)
+		mu.uids = make([]string, N)
 		for pb.Next() {
 			mu.Lock()
 			mu.Unlock()
@@ -295,7 +348,7 @@ func BenchmarkMutexUncontended(b *testing.B) {
 }
 
 func benchmarkMutex(b *testing.B, slack, work bool) {
-	var mu DMutex
+	mu := NewDRWMutex("")
 	if slack {
 		b.SetParallelism(10)
 	}
@@ -338,7 +391,7 @@ func BenchmarkMutexNoSpin(b *testing.B) {
 	// These goroutines yield during local work, so that switching from
 	// a blocked goroutine to other goroutines is profitable.
 	// As a matter of fact, this benchmark still triggers some spinning in the mutex.
-	var m DMutex
+	m := NewDRWMutex("")
 	var acc0, acc1 uint64
 	b.SetParallelism(4)
 	b.RunParallel(func(pb *testing.PB) {
@@ -370,7 +423,7 @@ func BenchmarkMutexSpin(b *testing.B) {
 	// profitable. To achieve this we create a goroutine per-proc.
 	// These goroutines access considerable amount of local data so that
 	// unnecessary rescheduling is penalized by cache misses.
-	var m DMutex
+	m := NewDRWMutex("")
 	var acc0, acc1 uint64
 	b.RunParallel(func(pb *testing.PB) {
 		var data [16 << 10]uint64
