@@ -38,12 +38,6 @@ var clnts []*RPCClient
 // Simple majority based quorum, set to dNodeCount/2+1
 var dquorum int
 
-func closeClients(clients []*RPCClient) {
-	for _, clnt := range clients {
-		clnt.Close()
-	}
-}
-
 // SetNodesWithPath - initializes package-level global state variables such as
 // nodes, rpcPaths, clnts.
 // N B - This function should be called only once inside any program that uses
