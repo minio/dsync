@@ -289,35 +289,13 @@ func releaseAll(clnts []*RPCClient, locks *[]bool, ids *[]string, lockName strin
 
 }
 
-// hasLock returns whether or not a node participated in granting the lock
-func (dm *DRWMutex) hasLock(node string) bool {
-
-	for index, n := range nodes {
-		if n == node {
-			return dm.locks[index]
-		}
-	}
-
-	return false
-}
-
-// locked returns whether or not we have met the quorum
-func (dm *DRWMutex) locked() bool {
-
-	locks := make([]bool, dnodeCount)
-	copy(locks[:], dm.locks[:])
-
-	return quorumMet(&locks)
-}
-
 // RUnlock releases a read lock held on dm.
 //
 // It is a run-time error if dm is not locked on entry to RUnlock.
 func (dm *DRWMutex) RUnlock() {
-	// Verify that we have the lock or panic otherwise (similar to sync.mutex)
-	if !dm.locked() {
-		panic("dsync: unlock of unlocked distributed mutex")
-	}
+	// We don't panic like sync.Mutex, when an unlock is issued on an
+	// un-locked lock, since the lock rpc server may have restarted and
+	// "forgotten" about the lock.
 
 	// We don't need to wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get
@@ -339,10 +317,9 @@ func (dm *DRWMutex) RUnlock() {
 // It is a run-time error if dm is not locked on entry to Unlock.
 func (dm *DRWMutex) Unlock() {
 
-	// Verify that we have the lock or panic otherwise (similar to sync.mutex)
-	if !dm.locked() {
-		panic("dsync: unlock of unlocked distributed mutex")
-	}
+	// We don't panic like sync.Mutex, when an unlock is issued on an
+	// un-locked lock, since the lock rpc server may have restarted and
+	// "forgotten" about the lock.
 
 	// We don't need to wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get
@@ -362,7 +339,7 @@ func (dm *DRWMutex) Unlock() {
 // sendRelease sends a release message to a node that previously granted a lock
 func sendRelease(c *RPCClient, name, uid string, isReadLock bool) {
 
-	backOffArray := []time.Duration{30 * time.Second, 1 * time.Minute, 3 * time.Minute, 10 * time.Minute, 30 * time.Minute, 1 * time.Hour }
+	backOffArray := []time.Duration{30 * time.Second, 1 * time.Minute, 3 * time.Minute, 10 * time.Minute, 30 * time.Minute, 1 * time.Hour}
 
 	go func(c *RPCClient, name, uid string) {
 
