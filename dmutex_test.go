@@ -32,7 +32,10 @@ import (
 	"time"
 )
 
-const N = 4 // number of lock servers for tests.
+const N = 4           // number of lock servers for tests.
+var nodes []string    // list of node IP addrs or hostname with ports.
+var rpcPaths []string // list of rpc paths were lock server is serving.
+
 type Locker struct {
 	mu sync.Mutex
 	// e.g, when a Lock(name) is held, map[string][]bool{"name" : []bool{true}}
@@ -68,9 +71,6 @@ func (locker *Locker) Unlock(name *string, reply *bool) error {
 func (locker *Locker) RLock(name *string, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	defer func() {
-		fmt.Printf("rlock: *reply = %+v\n", *reply)
-	}()
 	locksHeld, ok := locker.nsMap[*name]
 	if !ok {
 		// First read-lock to be held on *name.
@@ -91,9 +91,6 @@ func (locker *Locker) RLock(name *string, reply *bool) error {
 func (locker *Locker) RUnlock(name *string, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	defer func() {
-		fmt.Printf("runlock: *reply = %+v\n", *reply)
-	}()
 	locksHeld, ok := locker.nsMap[*name]
 	if !ok {
 		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", *name)
@@ -137,15 +134,21 @@ func TestMain(m *testing.M) {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	nodes := make([]string, 4)
+	nodes = make([]string, 4)
 	for i := range nodes {
 		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
 	}
-	var rpcPaths []string
 	for i := range nodes {
 		rpcPaths = append(rpcPaths, RpcPath+"-"+strconv.Itoa(i))
 	}
-	if err := SetNodesWithPath(nodes, rpcPaths); err != nil {
+
+	// Initialize net/rpc clients for dsync.
+	var clnts []RPC
+	for i := 0; i < len(nodes); i++ {
+		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
+	}
+
+	if err := SetNodesWithClients(clnts); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 	startRPCServers(nodes)
