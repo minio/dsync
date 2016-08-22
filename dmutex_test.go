@@ -32,7 +32,10 @@ import (
 	"time"
 )
 
-const N = 4 // number of lock servers for tests.
+const N = 4           // number of lock servers for tests.
+var nodes []string    // list of node IP addrs or hostname with ports.
+var rpcPaths []string // list of rpc paths were lock server is serving.
+
 type Locker struct {
 	mu sync.Mutex
 	// e.g, when a Lock(name) is held, map[string][]bool{"name" : []bool{true}}
@@ -40,72 +43,66 @@ type Locker struct {
 	nsMap map[string][]bool
 }
 
-func (locker *Locker) Lock(name *string, reply *bool) error {
+func (locker *Locker) Lock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[*name]
+	_, ok := locker.nsMap[args.Name]
 	if !ok {
 		*reply = true
-		locker.nsMap[*name] = []bool{true}
+		locker.nsMap[args.Name] = []bool{true}
 		return nil
 	}
 	*reply = false
 	return nil
 }
 
-func (locker *Locker) Unlock(name *string, reply *bool) error {
+func (locker *Locker) Unlock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[*name]
+	_, ok := locker.nsMap[args.Name]
 	if !ok {
-		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", *name)
+		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", args.Name)
 	}
 	*reply = true
-	delete(locker.nsMap, *name)
+	delete(locker.nsMap, args.Name)
 	return nil
 }
 
-func (locker *Locker) RLock(name *string, reply *bool) error {
+func (locker *Locker) RLock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	defer func() {
-		fmt.Printf("rlock: *reply = %+v\n", *reply)
-	}()
-	locksHeld, ok := locker.nsMap[*name]
+	locksHeld, ok := locker.nsMap[args.Name]
 	if !ok {
 		// First read-lock to be held on *name.
-		locker.nsMap[*name] = []bool{false}
+		locker.nsMap[args.Name] = []bool{false}
 	} else {
 		// Add an entry for this read lock.
-		if len(locker.nsMap[*name]) == 1 && locker.nsMap[*name][0] == true {
+		if len(locker.nsMap[args.Name]) == 1 && locker.nsMap[args.Name][0] == true {
 			*reply = false
 			return nil
 		}
-		locker.nsMap[*name] = append(locksHeld, false)
+		locker.nsMap[args.Name] = append(locksHeld, false)
 	}
 	*reply = true
 
 	return nil
 }
 
-func (locker *Locker) RUnlock(name *string, reply *bool) error {
+func (locker *Locker) RUnlock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	defer func() {
-		fmt.Printf("runlock: *reply = %+v\n", *reply)
-	}()
-	locksHeld, ok := locker.nsMap[*name]
+	locksHeld, ok := locker.nsMap[args.Name]
 	if !ok {
-		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", *name)
+		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", args.Name)
 	}
 	if len(locksHeld) > 1 {
 		// Remove one of the read locks held.
 		locksHeld = locksHeld[1:]
-		locker.nsMap[*name] = locksHeld
+		locker.nsMap[args.Name] = locksHeld
 	} else {
 		// Delete the map entry since this is the last read lock held
 		// on *name.
-		delete(locker.nsMap, *name)
+		delete(locker.nsMap, args.Name)
 	}
 	*reply = true
 	return nil
@@ -137,15 +134,21 @@ func TestMain(m *testing.M) {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	nodes := make([]string, 4)
+	nodes = make([]string, 4)
 	for i := range nodes {
 		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
 	}
-	var rpcPaths []string
 	for i := range nodes {
 		rpcPaths = append(rpcPaths, RpcPath+"-"+strconv.Itoa(i))
 	}
-	if err := SetNodesWithPath(nodes, rpcPaths); err != nil {
+
+	// Initialize net/rpc clients for dsync.
+	var clnts []RPC
+	for i := 0; i < len(nodes); i++ {
+		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
+	}
+
+	if err := SetNodesWithClients(clnts); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 	startRPCServers(nodes)
@@ -163,19 +166,6 @@ func TestSimpleLock(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond)
 
 	dm.Unlock()
-}
-
-func TestUnlockPanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("unlock of unlocked distributed mutex did not panic")
-		}
-	}()
-
-	mu := NewDRWMutex("test")
-	mu.Lock()
-	mu.Unlock()
-	mu.Unlock()
 }
 
 func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
