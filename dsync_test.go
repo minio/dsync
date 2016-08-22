@@ -34,7 +34,7 @@ import (
 
 const N = 4           // number of lock servers for tests.
 var nodes []string    // list of node IP addrs or hostname with ports.
-var rpcPaths []string // list of rpc paths were lock server is serving.
+var rpcPaths []string // list of rpc paths where lock server is serving.
 
 type Locker struct {
 	mu sync.Mutex
