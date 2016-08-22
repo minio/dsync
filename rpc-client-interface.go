@@ -16,8 +16,11 @@
 
 package dsync
 
+import "time"
+
 type TokenSetter interface {
 	SetToken(token string)
+	SetTimestamp(tstamp time.Time)
 }
 
 type RPC interface {

@@ -40,12 +40,17 @@ type Granted struct {
 }
 
 type LockArgs struct {
-	Token string
-	Name  string
+	Token     string
+	Timestamp time.Time
+	Name      string
 }
 
 func (l *LockArgs) SetToken(token string) {
 	l.Token = token
+}
+
+func (l *LockArgs) SetTimestamp(tstamp time.Time) {
+	l.Timestamp = tstamp
 }
 
 func NewDRWMutex(name string) *DRWMutex {
