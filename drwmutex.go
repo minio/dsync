@@ -39,6 +39,15 @@ type Granted struct {
 	uid    string
 }
 
+type LockArgs struct {
+	Token string
+	Name  string
+}
+
+func (l *LockArgs) SetToken(token string) {
+	l.Token = token
+}
+
 func NewDRWMutex(name string) *DRWMutex {
 	return &DRWMutex{
 		Name:  name,
@@ -149,9 +158,9 @@ func lock(clnts []RPC, locks *[]bool, uids *[]string, lockName string, isReadLoc
 			var status bool
 			var err error
 			if isReadLock {
-				err = c.Call("Dsync.RLock", lockName, &status)
+				err = c.Call("Dsync.RLock", &LockArgs{Name: lockName}, &status)
 			} else {
-				err = c.Call("Dsync.Lock", lockName, &status)
+				err = c.Call("Dsync.Lock", &LockArgs{Name: lockName}, &status)
 			}
 
 			locked, uid := false, ""
@@ -319,12 +328,12 @@ func sendRelease(c RPC, name, uid string, isReadLock bool) {
 			var err error
 			// TODO: Send UID to server
 			if isReadLock {
-				if err = c.Call("Dsync.RUnlock", name, &status); err == nil {
+				if err = c.Call("Dsync.RUnlock", &LockArgs{Name: name}, &status); err == nil {
 					// RUnlock delivered, exit out
 					return
 				}
 			} else {
-				if err = c.Call("Dsync.Unlock", name, &status); err == nil {
+				if err = c.Call("Dsync.Unlock", &LockArgs{Name: name}, &status); err == nil {
 					// Unlock delivered, exit out
 					return
 				}

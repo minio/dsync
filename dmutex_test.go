@@ -43,66 +43,66 @@ type Locker struct {
 	nsMap map[string][]bool
 }
 
-func (locker *Locker) Lock(name *string, reply *bool) error {
+func (locker *Locker) Lock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[*name]
+	_, ok := locker.nsMap[args.Name]
 	if !ok {
 		*reply = true
-		locker.nsMap[*name] = []bool{true}
+		locker.nsMap[args.Name] = []bool{true}
 		return nil
 	}
 	*reply = false
 	return nil
 }
 
-func (locker *Locker) Unlock(name *string, reply *bool) error {
+func (locker *Locker) Unlock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[*name]
+	_, ok := locker.nsMap[args.Name]
 	if !ok {
-		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", *name)
+		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", args.Name)
 	}
 	*reply = true
-	delete(locker.nsMap, *name)
+	delete(locker.nsMap, args.Name)
 	return nil
 }
 
-func (locker *Locker) RLock(name *string, reply *bool) error {
+func (locker *Locker) RLock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	locksHeld, ok := locker.nsMap[*name]
+	locksHeld, ok := locker.nsMap[args.Name]
 	if !ok {
 		// First read-lock to be held on *name.
-		locker.nsMap[*name] = []bool{false}
+		locker.nsMap[args.Name] = []bool{false}
 	} else {
 		// Add an entry for this read lock.
-		if len(locker.nsMap[*name]) == 1 && locker.nsMap[*name][0] == true {
+		if len(locker.nsMap[args.Name]) == 1 && locker.nsMap[args.Name][0] == true {
 			*reply = false
 			return nil
 		}
-		locker.nsMap[*name] = append(locksHeld, false)
+		locker.nsMap[args.Name] = append(locksHeld, false)
 	}
 	*reply = true
 
 	return nil
 }
 
-func (locker *Locker) RUnlock(name *string, reply *bool) error {
+func (locker *Locker) RUnlock(args *LockArgs, reply *bool) error {
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
-	locksHeld, ok := locker.nsMap[*name]
+	locksHeld, ok := locker.nsMap[args.Name]
 	if !ok {
-		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", *name)
+		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", args.Name)
 	}
 	if len(locksHeld) > 1 {
 		// Remove one of the read locks held.
 		locksHeld = locksHeld[1:]
-		locker.nsMap[*name] = locksHeld
+		locker.nsMap[args.Name] = locksHeld
 	} else {
 		// Delete the map entry since this is the last read lock held
 		// on *name.
-		delete(locker.nsMap, *name)
+		delete(locker.nsMap, args.Name)
 	}
 	*reply = true
 	return nil

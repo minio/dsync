@@ -16,7 +16,11 @@
 
 package dsync
 
+type TokenSetter interface {
+	SetToken(token string)
+}
+
 type RPC interface {
-	Call(serviceMethod string, args interface{}, reply interface{}) error
+	Call(serviceMethod string, args TokenSetter, reply interface{}) error
 	Close() error
 }
