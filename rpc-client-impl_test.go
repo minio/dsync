@@ -55,7 +55,7 @@ func (rpcClient *RPCClient) Close() error {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (rpcClient *RPCClient) Call(serviceMethod string, args TokenSetter, reply interface{}) error {
 	rpcClient.Lock()
 	defer rpcClient.Unlock()
 	// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
