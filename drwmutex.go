@@ -19,6 +19,7 @@ package dsync
 import (
 	"math"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 )
@@ -40,12 +41,17 @@ type Granted struct {
 }
 
 type LockArgs struct {
-	Token string
-	Name  string
+	Token     string
+	Timestamp time.Time
+	Name      string
 }
 
 func (l *LockArgs) SetToken(token string) {
 	l.Token = token
+}
+
+func (l *LockArgs) SetTimestamp(tstamp time.Time) {
+	l.Timestamp = tstamp
 }
 
 func NewDRWMutex(name string) *DRWMutex {
@@ -331,11 +337,21 @@ func sendRelease(c RPC, name, uid string, isReadLock bool) {
 				if err = c.Call("Dsync.RUnlock", &LockArgs{Name: name}, &status); err == nil {
 					// RUnlock delivered, exit out
 					return
+				} else if err != nil {
+					if nErr, ok := err.(net.Error); ok && nErr.Timeout() {
+						// RUnlock possibly failed with server timestamp mismatch, server may have restarted.
+						return
+					}
 				}
 			} else {
 				if err = c.Call("Dsync.Unlock", &LockArgs{Name: name}, &status); err == nil {
 					// Unlock delivered, exit out
 					return
+				} else if err != nil {
+					if nErr, ok := err.(net.Error); ok && nErr.Timeout() {
+						// Unlock possibly failed with server timestamp mismatch, server may have restarted.
+						return
+					}
 				}
 			}
 

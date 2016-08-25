@@ -19,6 +19,7 @@ package dsync
 import (
 	"net/rpc"
 	"sync"
+	"time"
 )
 
 // RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
@@ -55,7 +56,10 @@ func (rpcClient *RPCClient) Close() error {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args TokenSetter, reply interface{}) error {
+func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
+	SetToken(token string)
+	SetTimestamp(tstamp time.Time)
+}, reply interface{}) error {
 	rpcClient.Lock()
 	defer rpcClient.Unlock()
 	// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
