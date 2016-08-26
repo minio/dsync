@@ -19,6 +19,7 @@
 package dsync
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -36,75 +37,107 @@ const N = 4           // number of lock servers for tests.
 var nodes []string    // list of node IP addrs or hostname with ports.
 var rpcPaths []string // list of rpc paths where lock server is serving.
 
-type Locker struct {
-	mu sync.Mutex
+// used when cached timestamp do not match with what client remembers.
+var errInvalidTimestamp = errors.New("Timestamps don't match, server may have restarted.")
+
+type lockServer struct {
+	mutex sync.Mutex
 	// e.g, when a Lock(name) is held, map[string][]bool{"name" : []bool{true}}
 	// when one or more RLock() is held, map[string][]bool{"name" : []bool{false, false}}
-	nsMap map[string][]bool
+	lockMap   map[string][]bool
+	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
 
-func (locker *Locker) Lock(args *LockArgs, reply *bool) error {
-	locker.mu.Lock()
-	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[args.Name]
+func (l *lockServer) verifyArgs(args *LockArgs) error {
+	if !l.timestamp.Equal(args.Timestamp) {
+		return errInvalidTimestamp
+	}
+	// disabled for test framework
+	//if !isRPCTokenValid(args.Token) {
+	//	return errInvalidToken
+	//}
+	return nil
+}
+
+func (l *lockServer) Lock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.verifyArgs(args); err != nil {
+		return err
+	}
+	_, ok := l.lockMap[args.Name]
+	// No locks held on the given name.
 	if !ok {
 		*reply = true
-		locker.nsMap[args.Name] = []bool{true}
+		l.lockMap[args.Name] = []bool{true}
 		return nil
 	}
+	// Either a read or write lock is held on the given name.
 	*reply = false
 	return nil
 }
 
-func (locker *Locker) Unlock(args *LockArgs, reply *bool) error {
-	locker.mu.Lock()
-	defer locker.mu.Unlock()
-	_, ok := locker.nsMap[args.Name]
+func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.verifyArgs(args); err != nil {
+		return err
+	}
+	_, ok := l.lockMap[args.Name]
+	// No lock is held on the given name, there must be some issue at the lock client side.
 	if !ok {
 		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", args.Name)
 	}
 	*reply = true
-	delete(locker.nsMap, args.Name)
+	delete(l.lockMap, args.Name)
 	return nil
 }
 
-func (locker *Locker) RLock(args *LockArgs, reply *bool) error {
-	locker.mu.Lock()
-	defer locker.mu.Unlock()
-	locksHeld, ok := locker.nsMap[args.Name]
+func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.verifyArgs(args); err != nil {
+		return err
+	}
+	locksHeld, ok := l.lockMap[args.Name]
+	// No locks held on the given name.
 	if !ok {
 		// First read-lock to be held on *name.
-		locker.nsMap[args.Name] = []bool{false}
+		l.lockMap[args.Name] = []bool{false}
+		*reply = true
+	} else if len(locksHeld) == 1 && locksHeld[0] == true {
+		// A write-lock is held, read lock can't be granted.
+		*reply = false
 	} else {
 		// Add an entry for this read lock.
-		if len(locker.nsMap[args.Name]) == 1 && locker.nsMap[args.Name][0] == true {
-			*reply = false
-			return nil
-		}
-		locker.nsMap[args.Name] = append(locksHeld, false)
+		l.lockMap[args.Name] = append(locksHeld, false)
+		*reply = true
 	}
-	*reply = true
 
 	return nil
 }
 
-func (locker *Locker) RUnlock(args *LockArgs, reply *bool) error {
-	locker.mu.Lock()
-	defer locker.mu.Unlock()
-	locksHeld, ok := locker.nsMap[args.Name]
+func (l *lockServer) RUnlock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.verifyArgs(args); err != nil {
+		return err
+	}
+	locksHeld, ok := l.lockMap[args.Name]
 	if !ok {
 		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", args.Name)
 	}
 	if len(locksHeld) > 1 {
 		// Remove one of the read locks held.
 		locksHeld = locksHeld[1:]
-		locker.nsMap[args.Name] = locksHeld
+		l.lockMap[args.Name] = locksHeld
+		*reply = true
 	} else {
 		// Delete the map entry since this is the last read lock held
 		// on *name.
-		delete(locker.nsMap, args.Name)
+		delete(l.lockMap, args.Name)
+		*reply = true
 	}
-	*reply = true
 	return nil
 }
 
@@ -112,9 +145,9 @@ func startRPCServers(nodes []string) {
 
 	for i := range nodes {
 		server := rpc.NewServer()
-		server.RegisterName("Dsync", &Locker{
-			mu:    sync.Mutex{},
-			nsMap: make(map[string][]bool),
+		server.RegisterName("Dsync", &lockServer{
+			mutex:   sync.Mutex{},
+			lockMap: make(map[string][]bool),
 		})
 		// For some reason the registration paths need to be different (even for different server objs)
 		server.HandleHTTP(rpcPaths[i], fmt.Sprintf("%s-debug", rpcPaths[i]))
