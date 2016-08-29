@@ -157,7 +157,7 @@ func (dm *DRWMutex) Lock() {
 func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 
 	// Create buffered channel of quorum size
-	ch := make(chan Granted, dquorum)
+	ch := make(chan Granted, dnodeCount)
 
 	for index, c := range clnts {
 
@@ -191,12 +191,12 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 	wg.Add(1)
 	go func(isReadLock bool) {
 
-		// Wait until we have received (minimally) quorum number of responses or timeout
-		i := 0
+		// Wait until we have either a) received all lock responses, b) received too many 'non-'locks for quorum to be or c) time out
+		i, locksFailed := 0, 0
 		done := false
 		timeout := time.After(DRWMutexAcquireTimeout)
 
-		for ; i < dnodeCount; i++ {
+		for ; i < dnodeCount; i++ {	// Loop until we acquired all locks
 
 			select {
 			case grant := <-ch:
@@ -204,9 +204,13 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 					// Mark that this node has acquired the lock
 					(*locks)[grant.index] = true
 				} else {
-					done = true
-					//fmt.Println("one lock failed before quorum -- release locks acquired")
-					releaseAll(clnts, locks, lockName, isReadLock)
+					locksFailed++
+					if locksFailed > dnodeCount - dquorum {
+						// We know that we are not going to get the lock anymore, so exit out
+						// and release any locks that did get acquired
+						done = true
+						releaseAll(clnts, locks, lockName, isReadLock)
+					}
 				}
 
 			case <-timeout:
@@ -214,7 +218,6 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 				// timeout happened, maybe one of the nodes is slow, count
 				// number of locks to check whether we have quorum or not
 				if !quorumMet(locks) {
-					//fmt.Println("timed out -- release locks acquired")
 					releaseAll(clnts, locks, lockName, isReadLock)
 				}
 			}
