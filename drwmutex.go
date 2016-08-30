@@ -24,6 +24,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"sync/atomic"
 )
 
 // Indicator if logging is enabled.
@@ -39,9 +40,10 @@ const DRWMutexAcquireTimeout = 25 * time.Millisecond // 25ms.
 
 // A DRWMutex is a distributed mutual exclusion lock.
 type DRWMutex struct {
-	Name  string
-	locks []bool     // Array of nodes that granted a lock
-	m     sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
+	Name      string
+	locks     []bool     // Array of nodes that granted a lock
+	m         sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
+	singleUse int64      // Atomic counter to prevent more than one simultaneous call to either Lock() or RLock()
 }
 
 type Granted struct {
@@ -70,11 +72,31 @@ func NewDRWMutex(name string) *DRWMutex {
 	}
 }
 
+// preventSimultaneousCalls double checks that no more than one call can be active for Lock() and RLock()
+func (dm *DRWMutex) preventSimultaneousCalls() {
+	// Do not allow more than one simultaneous call to Lock() or RLock()
+	if atomic.AddInt64(&dm.singleUse, 1) > 1 {
+		panic("More than one simultaneous Lock() or RLock() on same object is not allowed -- use different DRWMutex objects instead")
+	}
+}
+
+// releaseSingleUse decrease the atomic counter to zero again
+func (dm *DRWMutex) releaseSingleUse() {
+	if atomic.AddInt64(&dm.singleUse, -1) != 0 {
+		panic("Atomic counter should always be zero upon release")
+	}
+}
+
 // RLock holds a read lock on dm.
 //
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (dm *DRWMutex) RLock() {
+
+	// Prevent more than one simultaneous call to Lock() or RLock()
+	dm.preventSimultaneousCalls()
+	defer dm.releaseSingleUse()
+
 	// Shield RLock() with local mutex in order to prevent more than
 	// one broadcast going out at the same time from this node
 	dm.m.Lock()
@@ -116,6 +138,10 @@ func (dm *DRWMutex) RLock() {
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (dm *DRWMutex) Lock() {
+
+	// Prevent more than one simultaneous call to Lock() or RLock()
+	dm.preventSimultaneousCalls()
+	defer dm.releaseSingleUse()
 
 	// Shield Lock() with local mutex in order to prevent more than
 	// one broadcast going out at the same time from this node
@@ -196,7 +222,7 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 		done := false
 		timeout := time.After(DRWMutexAcquireTimeout)
 
-		for ; i < dnodeCount; i++ {	// Loop until we acquired all locks
+		for ; i < dnodeCount; i++ { // Loop until we acquired all locks
 
 			select {
 			case grant := <-ch:
@@ -205,7 +231,7 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 					(*locks)[grant.index] = true
 				} else {
 					locksFailed++
-					if locksFailed > dnodeCount - dquorum {
+					if locksFailed > dnodeCount-dquorum {
 						// We know that we are not going to get the lock anymore, so exit out
 						// and release any locks that did get acquired
 						done = true
