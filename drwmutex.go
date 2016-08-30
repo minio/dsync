@@ -23,8 +23,8 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 	"sync/atomic"
+	"time"
 )
 
 // Indicator if logging is enabled.
