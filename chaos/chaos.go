@@ -23,7 +23,7 @@ const portStart = 12345
 
 // testNotEnoughServers verifies that when quorum cannot be achieved that locking will block.
 // Once another server comes up and quurom becomes possible, the lock will be granted
-func testNotEnoughServersForQuorum(wg sync.WaitGroup) {
+func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
@@ -123,7 +123,8 @@ func main() {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go testNotEnoughServersForQuorum(wg)
+	go testNotEnoughServersForQuorum(&wg)
+
 
 	wg.Wait()
 
