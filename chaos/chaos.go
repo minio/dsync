@@ -187,6 +187,59 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testSingleServerOverQuorumDownDuringLock")
 }
 
+// testMultipleServersOverQuorumDownDuringLockKnownError verifies that if multiple servers go down while a lock is held, and come back later
+// another lock on the same name is granted too early
+func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testMultipleServersOverQuorumDownDuringLockKnownError")
+
+	dm := dsync.NewDRWMutex("test")
+
+	// acquire lock
+	dm.Lock()
+	log.Println("Acquired lock")
+
+	// kill enough servers to free up enough servers to allow new quorum once restarted
+	for k := len(servers) - 1; k >= n-(n/2+1); k-- {
+		cmd := servers[k]
+		servers = servers[0:k]
+		killProcess(cmd)
+	}
+	log.Printf("Killed enough servers to free up enough servers to allow new quorum once restarted (still %d active)", len(servers))
+
+	// spin up servers after some time
+	go func() {
+		time.Sleep(2 * time.Second)
+		for k := len(servers); k < n; k++ {
+			servers = append(servers, launchTestServers(k, 1)...)
+		}
+		time.Sleep(100 * time.Millisecond)
+		log.Println("All servers active again -- new lock already granted")
+
+		time.Sleep(5 * time.Second)
+
+		log.Println("About to unlock first lock -- but new lock already granted")
+		dm.Unlock()
+	}()
+
+	dm2 := dsync.NewDRWMutex("test")
+
+	// try to acquire same lock -- granted once killed servers are up again
+	log.Println("Trying to acquire new lock on same resource...")
+	dm2.Lock()
+	log.Println("New lock granted (too soon)")
+
+	time.Sleep(6 * time.Second)
+	// release lock
+	dm2.Unlock()
+	log.Println("New lock released")
+
+	log.Println("**PASSED WITH KNOWN ERROR** testMultipleServersOverQuorumDownDuringLockKnownError")
+}
+
 func main() {
 
 	flag.Parse()
@@ -229,6 +282,9 @@ func main() {
 
 	wg.Add(1)
 	testSingleServerOverQuorumDownDuringLock(&wg)
+
+	wg.Add(1)
+	testMultipleServersOverQuorumDownDuringLockKnownError(&wg)
 
 	wg.Wait()
 
