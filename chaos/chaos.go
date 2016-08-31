@@ -22,8 +22,8 @@ var (
 const n = 4
 const portStart = 12345
 
-// testNotEnoughServers verifies that when quorum cannot be achieved that locking will block.
-// Once another server comes up and quurom becomes possible, the lock will be granted
+// testNotEnoughServersForQuorum verifies that when quorum cannot be achieved that locking will block.
+// Once another server comes up and quorum becomes possible, the lock will be granted
 func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 	defer wg.Done()
