@@ -323,18 +323,20 @@ func main() {
 
 	wg := sync.WaitGroup{}
 
-	//wg.Add(1)
-	//go testNotEnoughServersForQuorum(&wg)
+	wg.Add(1)
+	go testNotEnoughServersForQuorum(&wg)
+	wg.Wait()
 
-	//wg.Add(1)
-	//go testServerGoingDown(&wg)
+	wg.Add(1)
+	go testServerGoingDown(&wg)
+	wg.Wait()
 
 	wg.Add(1)
 	testSingleServerOverQuorumDownDuringLock(&wg)
+	wg.Wait()
 
 	wg.Add(1)
 	testMultipleServersOverQuorumDownDuringLockKnownError(&wg)
-
 	wg.Wait()
 
 	/*	// Start server
