@@ -130,12 +130,6 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testServerGoingDown")
 }
 
-// testStaleLock verifies that a stale lock does not prevent a new lock from being granted
-func testStaleLock(wg *sync.WaitGroup) {
-
-	defer wg.Done()
-}
-
 // testServerDownDuringLock verifies that if a server goes down while a lock is held, and comes back later
 // another lock on the same name is not granted too early
 func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
@@ -246,6 +240,53 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 	log.Println("New lock released")
 
 	log.Println("**PASSED WITH KNOWN ERROR** testMultipleServersOverQuorumDownDuringLockKnownError")
+}
+
+// testSingleStaleLock verifies that, despite a single stale lock, a new lock can still be acquired on same resource
+func testSingleStaleLock(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testSingleStaleLock")
+
+	// lock is acquired
+
+	// network connection is lost to single server
+
+	// lock is released
+
+	// client that has lock dies (so unlock retries /w back-off mechanism stop)
+
+	// network connection is repaired to lost server
+
+	// client is restarted
+
+	// lock on same resource can be acquired despite single server having a stale lock
+
+}
+
+// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
+func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testMultipleStaleLocksKnownError")
+
+	// lock is acquired
+
+	// network connections are lost to multiple servers (enough to prevent new quorum)
+
+	// lock is released
+
+	// client that has lock dies (so unlock retries /w back-off mechanism stop)
+
+	// network connection is repaired to lost servers
+
+	// client is restarted
+
+	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
 }
 
 func main() {
