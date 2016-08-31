@@ -74,9 +74,11 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	log.Println("Released lock")
 
 	// spin up servers again
-	for k := n/2 + 1; k < n; k++ {
+	for k := len(servers); k < n; k++ {
 		servers = append(servers, launchTestServers(k, 1)...)
 	}
+
+	log.Println("PASSED testNotEnoughServersForQuorum")
 
 }
 
@@ -107,7 +109,7 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 	// spin up servers after some time
 	go func() {
 		time.Sleep(5 * time.Second)
-		for k := n / 2; k < nTest ; k++ {
+		for k := len(servers); k < n; k++ {
 			servers = append(servers, launchTestServers(k, 1)...)
 		}
 		log.Println("All servers active again")
@@ -119,11 +121,14 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 
 	dm.Unlock()
 	log.Println("Released lock")
+
+	log.Println("PASSED testServerGoingDown")
 }
 
 // testStaleLock verifies that a stale lock does not prevent a new lock from being granted
-func testStaleLock() {
+func testStaleLock(wg *sync.WaitGroup) {
 
+	defer wg.Done()
 }
 
 // testServerDownDuringLock verifies that if a server goes down while a lock is held, and comes back later
