@@ -191,6 +191,8 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
 // testMultipleServersOverQuorumDownDuringLockKnownError verifies that if multiple servers go down while a lock is held, and come back later
 // another lock on the same name is granted too early
+//
+// Specific deficiency: more than one lock is granted on the same (exclusive) resource
 func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 
 	defer wg.Done()
@@ -267,6 +269,8 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 }
 
 // testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
+//
+// Specific deficiency: lock can no longer be granted although resource is not locked
 func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
 
 	defer wg.Done()
