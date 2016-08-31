@@ -9,15 +9,16 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 	"sync"
+	"time"
 )
 
 var (
 	portFlag = flag.Int("p", 0, "Port for server to listen on")
 	rpcPaths []string
-	servers []*exec.Cmd
+	servers  []*exec.Cmd
 )
+
 const n = 4
 const portStart = 12345
 
@@ -28,7 +29,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	// first kill half the quorum of servers
-	for k := len(servers)-1; k >= n / 2; k-- {
+	for k := len(servers) - 1; k >= n/2; k-- {
 		cmd := servers[k]
 		servers = servers[0:k]
 		killProcess(cmd)
@@ -38,10 +39,10 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	go func() {
 		time.Sleep(7 * time.Second)
 		log.Println("Launching extra server")
-		servers = append(servers, launchTestServers(n / 2, 1)...)
+		servers = append(servers, launchTestServers(n/2, 1)...)
 	}()
 
-	dm := dsync.NewDRWMutex("aap")
+	dm := dsync.NewDRWMutex("test")
 
 	log.Println("Trying to acquire lock but too few servers active...")
 	dm.Lock()
@@ -49,10 +50,10 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 	time.Sleep(2 * time.Second)
 
-	// kill extra server (quurum not available anymore)
+	// kill extra server (quorum not available anymore)
 	log.Println("Killing extra server")
 	cmd := servers[n/2]
-	servers = servers[0:n/2]
+	servers = servers[0 : n/2]
 	killProcess(cmd)
 
 	dm.Unlock()
@@ -62,7 +63,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	go func() {
 		time.Sleep(5 * time.Second)
 		log.Println("Launching extra server again")
-		servers = append(servers, launchTestServers(n / 2, 1)...)
+		servers = append(servers, launchTestServers(n/2, 1)...)
 	}()
 
 	log.Println("Trying to acquire lock again but too few servers active...")
@@ -73,7 +74,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	log.Println("Released lock")
 
 	// spin up servers again
-	for k := n/ 2 + 1; k < len(servers); k++ {
+	for k := n/2 + 1; k < n; k++ {
 		servers = append(servers, launchTestServers(k, 1)...)
 	}
 
