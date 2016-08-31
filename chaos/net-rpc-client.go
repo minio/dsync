@@ -19,8 +19,8 @@ package main
 import (
 	"errors"
 	"net/rpc"
-	"time"
 	"sync"
+	"time"
 )
 
 // RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
@@ -75,7 +75,10 @@ func (rpcClient *RPCClient) dialRPCClient() (*rpc.Client, error) {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args interface { SetTimestamp(time.Time); SetToken(string) }, reply interface{}) error {
+func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
+	SetTimestamp(time.Time)
+	SetToken(string)
+}, reply interface{}) error {
 	// Make a copy below so that we can safely (continue to) work with the rpc.Client.
 	// Even in the case the two threads would simultaneously find that the connection is not initialised,
 	// they would both attempt to dial and only one of them would succeed in doing so.
