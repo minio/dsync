@@ -28,6 +28,9 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
+	log.Println("")
+	log.Println("**STARTING** testNotEnoughServersForQuorum")
+
 	// first kill half the quorum of servers
 	for k := len(servers) - 1; k >= n/2; k-- {
 		cmd := servers[k]
@@ -87,6 +90,9 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
+	log.Println("")
+	log.Println("**STARTING** testServerGoingDown")
+
 	dm := dsync.NewDRWMutex("test")
 
 	dm.Lock()
@@ -135,6 +141,9 @@ func testStaleLock(wg *sync.WaitGroup) {
 func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
 	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testSingleServerOverQuorumDownDuringLock")
 
 	// make sure that we just have enough quorum
 	// kill half the quorum of servers
