@@ -78,8 +78,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 		servers = append(servers, launchTestServers(k, 1)...)
 	}
 
-	log.Println("PASSED testNotEnoughServersForQuorum")
-
+	log.Println("**PASSED** testNotEnoughServersForQuorum")
 }
 
 // testServerGoingDown tests that a lock is granted when all servers are up, after too
@@ -122,7 +121,7 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 	dm.Unlock()
 	log.Println("Released lock")
 
-	log.Println("PASSED testServerGoingDown")
+	log.Println("**PASSED** testServerGoingDown")
 }
 
 // testStaleLock verifies that a stale lock does not prevent a new lock from being granted
@@ -175,7 +174,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
 	dm2 := dsync.NewDRWMutex("test")
 
-	// try to acquire same lock -- only granted after first lock relesed
+	// try to acquire same lock -- only granted after first lock released
 	log.Println("Trying to acquire new lock on same resource...")
 	dm2.Lock()
 	log.Println("New lock granted")
@@ -342,7 +341,6 @@ func countProcesses(name string) bool {
 	cmd := exec.Command("pgrep", name)
 	cmb, _ := cmd.CombinedOutput()
 	procs := strings.Count(string(cmb), "\n")
-	log.Println(procs)
 	if procs > 1 {
 		fmt.Println("Found more than one", name, "process. Killing all and exiting")
 		cmd = exec.Command("pkill", "-SIGKILL", name)
