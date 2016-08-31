@@ -82,8 +82,43 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 // testServerGoingDown tests that a lock is granted when all servers are up, after too
 // many servers die that a new lock will block and once servers are up again, the lock is granted.
-func testServerGoingDown() {
+func testServerGoingDown(wg *sync.WaitGroup) {
 
+	defer wg.Done()
+
+	dm := dsync.NewDRWMutex("test")
+
+	dm.Lock()
+	log.Println("Acquired lock")
+
+	time.Sleep(100 * time.Millisecond)
+
+	dm.Unlock()
+	log.Println("Released lock")
+
+	// kill half the quorum of servers
+	for k := len(servers) - 1; k >= n/2; k-- {
+		cmd := servers[k]
+		servers = servers[0:k]
+		killProcess(cmd)
+	}
+	log.Println("Killed half the servers")
+
+	// spin up servers after some time
+	go func() {
+		time.Sleep(5 * time.Second)
+		for k := n / 2; k < nTest ; k++ {
+			servers = append(servers, launchTestServers(k, 1)...)
+		}
+		log.Println("All servers active again")
+	}()
+
+	log.Println("Trying to acquire lock...")
+	dm.Lock()
+	log.Println("Acquired lock again")
+
+	dm.Unlock()
+	log.Println("Released lock")
 }
 
 // testStaleLock verifies that a stale lock does not prevent a new lock from being granted
@@ -111,7 +146,6 @@ func main() {
 		os.Exit(-1)
 	}
 
-
 	servers = []*exec.Cmd{}
 
 	log.SetPrefix(fmt.Sprintf("[chaos] "))
@@ -121,7 +155,7 @@ func main() {
 	// Initialize net/rpc clients for dsync.
 	var clnts []dsync.RPC
 	for i := 0; i < n; i++ {
-		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath + "-" + strconv.Itoa(portStart+i)))
+		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
 	}
 
 	if err := dsync.SetNodesWithClients(clnts); err != nil {
@@ -132,12 +166,13 @@ func main() {
 
 	wg := sync.WaitGroup{}
 
-	wg.Add(1)
-	go testNotEnoughServersForQuorum(&wg)
+	//wg.Add(1)
+	//go testNotEnoughServersForQuorum(&wg)
 
+	wg.Add(1)
+	go testServerGoingDown(&wg)
 
 	wg.Wait()
-
 
 	/*	// Start server
 		startRPCServer(*portFlag)
@@ -195,7 +230,7 @@ func countProcesses(name string) bool {
 	procs := strings.Count(string(cmb), "\n")
 	log.Println(procs)
 	if procs > 1 {
-		fmt.Println("Found more than one", name, "process. Killing all and exiting" )
+		fmt.Println("Found more than one", name, "process. Killing all and exiting")
 		cmd = exec.Command("pkill", "-SIGKILL", name)
 		cmb, _ = cmd.CombinedOutput()
 		return true
@@ -207,7 +242,7 @@ func launchTestServers(start, number int) []*exec.Cmd {
 
 	result := []*exec.Cmd{}
 
-	for p := portStart+start; p < portStart+start+number; p++ {
+	for p := portStart + start; p < portStart+start+number; p++ {
 		result = append(result, launchProcess(p))
 	}
 
