@@ -133,8 +133,58 @@ func testStaleLock(wg *sync.WaitGroup) {
 
 // testServerDownDuringLock verifies that if a server goes down while a lock is held, and comes back later
 // another lock on the same name is not granted too early
-func testServerDownDuringLock() {
+func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
+	defer wg.Done()
+
+	// make sure that we just have enough quorum
+	// kill half the quorum of servers
+	for k := len(servers) - 1; k >= n/2+1; k-- {
+		cmd := servers[k]
+		servers = servers[0:k]
+		killProcess(cmd)
+	}
+	log.Println("Killed just enough servers to keep quorum")
+
+	dm := dsync.NewDRWMutex("test")
+
+	// acquire lock
+	dm.Lock()
+	log.Println("Acquired lock")
+
+	// kill one server which will lose one active lock
+	cmd := servers[n/2]
+	servers = servers[0:n/2]
+	killProcess(cmd)
+	log.Println("Killed one more server to lose quorum")
+
+	// spin up servers after some time
+	go func() {
+		time.Sleep(2 * time.Second)
+		for k := len(servers); k < n; k++ {
+			servers = append(servers, launchTestServers(k, 1)...)
+		}
+		time.Sleep(100 * time.Millisecond)
+		log.Println("All servers active again -- but new lock still blocking")
+
+		time.Sleep(6 * time.Second)
+
+		log.Println("About to unlock first lock -- new lock should be granted")
+		dm.Unlock()
+	}()
+
+	dm2 := dsync.NewDRWMutex("test")
+
+	// try to acquire same lock -- only granted after first lock relesed
+	log.Println("Trying to acquire new lock on same resource...")
+	dm2.Lock()
+	log.Println("New lock granted")
+
+	// release lock
+	dm2.Unlock()
+	log.Println("New lock released")
+
+	log.Println("**PASSED** testSingleServerOverQuorumDownDuringLock")
 }
 
 func main() {
@@ -174,8 +224,11 @@ func main() {
 	//wg.Add(1)
 	//go testNotEnoughServersForQuorum(&wg)
 
+	//wg.Add(1)
+	//go testServerGoingDown(&wg)
+
 	wg.Add(1)
-	go testServerGoingDown(&wg)
+	testSingleServerOverQuorumDownDuringLock(&wg)
 
 	wg.Wait()
 
