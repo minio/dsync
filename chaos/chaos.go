@@ -62,12 +62,21 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 	go func() {
 		time.Sleep(5 * time.Second)
 		log.Println("Launching extra server again")
-		servers = append(servers, launchTestServers(2, 1)...)
+		servers = append(servers, launchTestServers(n / 2, 1)...)
 	}()
 
 	log.Println("Trying to acquire lock again but too few servers active...")
 	dm.Lock()
 	log.Println("Acquired lock again")
+
+	dm.Unlock()
+	log.Println("Released lock")
+
+	// spin up servers again
+	for k := n/ 2 + 1; k < len(servers); k++ {
+		servers = append(servers, launchTestServers(k, 1)...)
+	}
+
 }
 
 // testServerGoingDown tests that a lock is granted when all servers are up, after too
