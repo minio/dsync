@@ -96,7 +96,7 @@ Known deficiencies
 Server side logic
 -----------------
 
-On the server side just the following logic needs to be added (barring some extra error checking)
+On the server side just the following logic needs to be added (barring some extra error checking):
 
 ```
 const WriteLock = -1
@@ -104,7 +104,7 @@ const WriteLock = -1
 type lockServer struct {
 	mutex   sync.Mutex
 	lockMap map[string]int64 // Map of locks, with negative value indicating (exclusive) write lock
-	                         // and positive value indicating number of read locks
+	                         // and positive values indicating number of read locks
 }
 
 func (l *lockServer) Lock(args *LockArgs, reply *bool) error {
@@ -132,6 +132,45 @@ func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
 }
 ```
 
+If you also want RLock()/RUnlock() functionality, then add this as well:
+
+```
+const ReadLock = 1
+
+func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply {
+		l.lockMap[args.Name] = ReadLock // No locks held on the given name, so claim (first) read lock
+		*reply = true
+	} else {
+		if *reply = locksHeld != WriteLock; *reply { // Unless there is a write lock
+			l.lockMap[args.Name] = locksHeld + ReadLock // Grant another read lock
+		}
+	}
+	return nil
+}
+
+func (l *lockServer) RUnlock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+		return fmt.Errorf("RUnlock attempted on an unlocked entity: %s", args.Name)
+	}
+	if *reply = locksHeld != WriteLock; !*reply { // A write-lock is held, cannot release a read lock
+		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
+	}
+	if locksHeld > ReadLock {
+		l.lockMap[args.Name] = locksHeld - ReadLock // Remove one of the read locks held
+	} else {
+		delete(l.lockMap, args.Name) // Remove the (last) read lock
+	}
+	return nil
+}
+```
+
 Issues
 ------
 
@@ -146,19 +185,10 @@ Comparison to other techniques
 
 We are well aware that there are more sophisticated systems such as zookeeper, raft, etc but we found that for our limited use case this was adding too much complexity. So if `dsync` does not meet your requirements than you are probably better off using one of those systems.
 
-Performance
------------
+Extensions / Other use cases
+----------------------------
 
-```
-benchmark                       old ns/op     new ns/op     delta
-BenchmarkMutexUncontended-8     4.22          1164018       +27583264.93%
-BenchmarkMutex-8                96.5          1223266       +1267533.16%
-BenchmarkMutexSlack-8           120           1192900       +993983.33%
-BenchmarkMutexWork-8            108           1239893       +1147949.07%
-BenchmarkMutexWorkSlack-8       142           1210129       +852103.52%
-BenchmarkMutexNoSpin-8          292           319479        +109310.62%
-BenchmarkMutexSpin-8            1163          1270066       +109106.02%
-```
+Depending on your use case and how resilient you want to be for outages of servers, strictly speaking it is not necessarily needed to acquire a lock from all connected nodes. For instance one could imagine a system of 64 servers where only a quorom majority out of `8` would be needed (thus minimally 5 locks granted out of 8 servers). This would require some sort of pseudo-random 'deterministic' selection of 8 servers out of the total of 64 servers. A simple hashing of the resource name could be use to derive a deterministic set of 8 servers which would then be contacted.
 
 License
 -------
