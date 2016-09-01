@@ -96,9 +96,40 @@ Known deficiencies
 Server side logic
 -----------------
 
-On the server side the following logic 
+On the server side just the following logic needs to be added (barring some extra error checking)
 
 ```
+const WriteLock = -1
+
+type lockServer struct {
+	mutex   sync.Mutex
+	lockMap map[string]int64 // Map of locks, with negative value indicating (exclusive) write lock
+	                         // and positive value indicating number of read locks
+}
+
+func (l *lockServer) Lock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if _, *reply = l.lockMap[args.Name]; !*reply {
+		l.lockMap[args.Name] = WriteLock // No locks held on the given name, so claim write lock
+	}
+	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
+	return nil
+}
+
+func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+		return fmt.Errorf("Unlock attempted on an unlocked entity: %s", args.Name) 
+	}
+	if *reply = locksHeld == WriteLock; !*reply { // Unless it is a write lock
+		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, locksHeld)
+	}
+	delete(l.lockMap, args.Name) // Remove the write lock
+	return nil
+}
 ```
 
 Issues
