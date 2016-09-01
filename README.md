@@ -24,12 +24,11 @@ _(note that the same identical command should be run on servers `server1` throug
 Design goals
 ------------
 
+* Implements [`sync/Locker`](https://github.com/golang/go/blob/master/src/sync/mutex.go#L30) interface (for exclusive lock)
 * Simple design: by keeping the design simple, many tricky edge cases can be avoided.
 * No master node: there is no concept of a master node which, if this would be used and the master would be down, causes locking to come to a complete stop. (Unless you have a design with a slave node but this adds yet more complexity.)
 * Resilient: if one or more nodes go down, the other nodes should not be affected and can continue to acquire locks (provided not more than `n/2 - 1` nodes are down).
 * Automatically reconnect to (restarted) nodes.
-* Compatible with `sync/mutex` API.
-
 
 Restrictions
 ------------
