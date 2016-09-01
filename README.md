@@ -6,7 +6,7 @@ A distributed sync package.
 Introduction
 ------------
  
-`dsync` is a package for doing distributed locks over a network of `n` nodes. It is designed with simplicity in mind and hence offers limited scalability (`n <= 16`). Each node will be connected to all other nodes and lock requests from any node will be broadcast to all connected nodes. A node will succeed in getting the lock if `n/2 + 1` nodes (including itself) respond positively. If the lock is acquired it can be held for some time and needs to be released afterwards. This will cause the release to be broadcast to all nodes after which the lock becomes available again.
+`dsync` is a package for doing distributed locks over a network of `n` nodes. It is designed with simplicity in mind and hence offers limited scalability (`n <= 16`). Each node will be connected to all other nodes and lock requests from any node will be broadcast to all connected nodes. A node will succeed in getting the lock if `n/2 + 1` nodes (whether or not including itself) respond positively. If the lock is acquired it can be held for as long as the client desired and needs to be released afterwards. This will cause the release to be broadcast to all nodes after which the lock becomes available again.
 
 Design goals
 ------------
@@ -24,15 +24,70 @@ Restrictions
 * Limited scalability: up to 16 nodes.
 * Fixed configuration: changes in the number and/or network names/IP addresses need a restart of all nodes in order to take effect.
 * If a down node comes up, it will not in any way (re)acquire any locks that it may have held.
-* Not designed for high performance applications such as key/value stores 
+* Not designed for high performance applications such as key/value stores.
 
 Performance
 -----------
 
-* Lock requests (successful) should not take longer than 1ms (provided decent network connection of 1 Gbit or more between the nodes)
-* Support up to 4000 locks per node per second. 
-* Scale linearly with the number of locks. For the maximum size case of 16 nodes this means a maximum of 64K locks/sec (and 2048K lock request & release messages/sec)
-* Do not take more than (overall) 10% CPU usage
+* Support up to a total of 4000 locks/second for maximum size of 16 nodes (consuming 10% CPU usage per server) on moderately powerful server hardware.
+* Lock requests (successful) should not take longer than 1ms (provided decent network connection of 1 Gbit or more between the nodes).
+
+
+
+Usage
+-----
+
+Here is a simple case showing how to protect one resource 
+
+```
+import (
+    "github.com/minio/dsync
+)
+
+func locksSameResource() {
+
+    // Two locks on same resource
+	dm1st := dsync.NewDRWMutex("test")
+	dm2nd := dsync.NewDRWMutex("test")
+
+	dm1st.Lock()
+    log.Println("dm1st locked")
+
+	// Release 1st lock after 5 seconds
+	go func() {
+		time.Sleep(5 * time.Second)
+		log.Println("dm1st unlocked")
+		dm1st.Unlock()
+	}()
+
+    // Try to acquire 2nd lock, will block until 1st lock is released
+    log.Println("About to lock dm2nd...")
+	dm2nd.Lock()
+    log.Println("dm2nd locked")
+
+	time.Sleep(2 * time.Second)
+	dm2nd.Unlock()
+}
+```
+
+```
+
+```
+
+
+Dealing with Stale Locks
+------------------------
+
+Known deficiencies
+------------------
+
+Server side logic
+-----------------
+
+On the server side the following logic 
+
+```
+```
 
 Issues
 ------
@@ -61,14 +116,6 @@ BenchmarkMutexWorkSlack-8       142           1210129       +852103.52%
 BenchmarkMutexNoSpin-8          292           319479        +109310.62%
 BenchmarkMutexSpin-8            1163          1270066       +109106.02%
 ```
-
-Usage
------
-
-Explain usage
-```
-```
-
 
 License
 -------
