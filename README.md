@@ -1,12 +1,25 @@
 dsync
 =====
 
-A distributed sync package.
+A distributed sync package for Go.
 
 Introduction
 ------------
  
 `dsync` is a package for doing distributed locks over a network of `n` nodes. It is designed with simplicity in mind and hence offers limited scalability (`n <= 16`). Each node will be connected to all other nodes and lock requests from any node will be broadcast to all connected nodes. A node will succeed in getting the lock if `n/2 + 1` nodes (whether or not including itself) respond positively. If the lock is acquired it can be held for as long as the client desired and needs to be released afterwards. This will cause the release to be broadcast to all nodes after which the lock becomes available again.
+
+Motivation
+----------
+
+This package was developed for the distributed server version of the [Minio Object Storage](https://minio.io/). For this we needed a distributed locking mechanism for up to 16 servers that each would be running `minio server`. The locking mechanism itself should be a reader/writer mutual exclusion lock meaning that it can be held by a single writer or an arbitrary number of readers.
+
+In [minio](https://minio.io/) the distributed version is started as follows (for a 6-server system):
+
+```
+$ minio server server1/disk server2/disk server3/disk server4/disk server5/disk server6/disk 
+```
+ 
+_(note that the same identical command should be run on servers `server1` through to `server6`)_
 
 Design goals
 ------------
