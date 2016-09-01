@@ -268,7 +268,7 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 
 }
 
-// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
+// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock on same resource
 //
 // Specific deficiency: lock can no longer be granted although resource is not locked
 func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
@@ -279,18 +279,62 @@ func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
 	log.Println("**STARTING** testMultipleStaleLocksKnownError")
 
 	// lock is acquired
+	dmCreateStaleLocks := dsync.NewDRWMutex("test")
+
+	// acquire lock
+	dmCreateStaleLocks.Lock()
+	log.Println("Acquired lock")
 
 	// network connections are lost to multiple servers (enough to prevent new quorum)
-
 	// lock is released
-
 	// client that has lock dies (so unlock retries /w back-off mechanism stop)
-
 	// network connection is repaired to lost servers
-
 	// client is restarted
 
 	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
+}
+
+// testClientThatHasLockCrashes verifies that multiple stale locks will prevent a new lock on same resource
+//
+// Specific deficiency: lock can no longer be acquired although resource is not locked
+func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testClientThatHasLockCrashes")
+
+	// lock is acquired
+	dmCreateStaleLocks := dsync.NewDRWMutex("test-stale")
+
+	// acquire (read) lock
+	dmCreateStaleLocks.RLock()
+	log.Println("Acquired lock")
+
+	// client crashes while hanging on to the lock
+	/* dmCreateStaleLocks.RUnlock() -- should not be executed due to client crash */
+	log.Println("Client that has lock crashes; leaving stale locks at servers")
+
+	dm := dsync.NewDRWMutex("test-stale")
+
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func(){
+		log.Println("Trying to get the lock again")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		log.Println("Acquired lock again -- should not happen")
+
+	case <-time.After(5 * time.Second):
+		log.Println("Timed out")
+	}
+
+	log.Println("**PASSED WITH KNOWN ERROR** testClientThatHasLockCrashes")
 }
 
 func main() {
