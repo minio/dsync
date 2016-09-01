@@ -44,19 +44,19 @@ Performance
 * Support up to a total of 4000 locks/second for maximum size of 16 nodes (consuming 10% CPU usage per server) on moderately powerful server hardware.
 * Lock requests (successful) should not take longer than 1ms (provided decent network connection of 1 Gbit or more between the nodes).
 
-
-
 Usage
 -----
 
-Here is a simple case showing how to protect one resource 
+### Exclusive lock 
+
+Here is a simple case showing how to protect a single resource (drop-in replacement for `sync/mutex`):
 
 ```
 import (
-    "github.com/minio/dsync
+    "github.com/minio/dsync"
 )
 
-func locksSameResource() {
+func lockSameResource() {
 
     // Two locks on same resource
 	dm1st := dsync.NewDRWMutex("test")
@@ -73,7 +73,7 @@ func locksSameResource() {
 	}()
 
     // Try to acquire 2nd lock, will block until 1st lock is released
-    log.Println("About to lock dm2nd...")
+    log.Println("about to lock dm2nd...")
 	dm2nd.Lock()
     log.Println("dm2nd locked")
 
@@ -82,6 +82,13 @@ func locksSameResource() {
 }
 ```
 
+This gives the following results:
+
+```
+2016/09/01 15:53:03 dm1st locked
+2016/09/01 15:53:03 about to lock dm2nd...
+2016/09/01 15:53:08 dm1st unlocked
+2016/09/01 15:53:09 dm2nd locked
 ```
 
 ```
