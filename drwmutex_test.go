@@ -228,7 +228,7 @@ func TestUnlockPanic2(t *testing.T) {
 			t.Fatalf("unlock of unlocked RWMutex did not panic")
 		}
 	}()
-	mu := NewDRWMutex("test")
+	mu := NewDRWMutex("test-unlock-panic-2")
 	mu.RLock()
 	mu.Unlock()
 }
@@ -251,7 +251,7 @@ func TestRUnlockPanic2(t *testing.T) {
 			t.Fatalf("read unlock of unlocked RWMutex did not panic")
 		}
 	}()
-	mu := NewDRWMutex("test")
+	mu := NewDRWMutex("test-runlock-panic-2")
 	mu.Lock()
 	mu.RUnlock()
 }
