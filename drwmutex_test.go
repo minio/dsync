@@ -21,6 +21,7 @@ package dsync
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -169,4 +170,40 @@ func TestRWMutex(t *testing.T) {
 	HammerRWMutex(10, 3, n)
 	HammerRWMutex(10, 10, n)
 	HammerRWMutex(10, 5, n)
+}
+
+// Borrowed from rwmutex_test.go
+func TestDRLocker(t *testing.T) {
+	wl := NewDRWMutex("test")
+	var rl sync.Locker
+	wlocked := make(chan bool, 1)
+	rlocked := make(chan bool, 1)
+	rl = wl.DRLocker()
+	n := 10
+	go func() {
+		for i := 0; i < n; i++ {
+			rl.Lock()
+			rl.Lock()
+			rlocked <- true
+			wl.Lock()
+			wlocked <- true
+		}
+	}()
+	for i := 0; i < n; i++ {
+		<-rlocked
+		rl.Unlock()
+		select {
+		case <-wlocked:
+			t.Fatal("RLocker() didn't read-lock it")
+		default:
+		}
+		rl.Unlock()
+		<-wlocked
+		select {
+		case <-rlocked:
+			t.Fatal("RLocker() didn't respect the write lock")
+		default:
+		}
+		wl.Unlock()
+	}
 }
