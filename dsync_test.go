@@ -258,7 +258,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	}()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
@@ -279,6 +279,27 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 		time.Sleep(2500 * time.Millisecond)
 
 		dm3rd.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		dm3rd.Lock()
+
+		// Release lock after 10 seconds
+		go func() {
+			time.Sleep(2500 * time.Millisecond)
+			fmt.Println("Unlocking dm3")
+
+			dm3rd.Unlock()
+		}()
+
+		dm2nd.Lock()
+
+		fmt.Printf("2nd lock obtained after 1st & 3rd locks are released\n")
+		time.Sleep(2500 * time.Millisecond)
+
+		dm2nd.Unlock()
 	}()
 
 	wg.Wait()
@@ -314,8 +335,8 @@ func HammerMutex(m *DRWMutex, loops int, cdone chan bool) {
 // Borrowed from mutex_test.go
 func TestMutex(t *testing.T) {
 	c := make(chan bool)
+	m := NewDRWMutex("test")
 	for i := 0; i < 10; i++ {
-		m := NewDRWMutex("test")
 		go HammerMutex(m, 1000, c)
 	}
 	for i := 0; i < 10; i++ {
