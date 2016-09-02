@@ -351,7 +351,6 @@ func BenchmarkMutexUncontended(b *testing.B) {
 	}
 	b.RunParallel(func(pb *testing.PB) {
 		var mu PaddedMutex
-		mu.locks = make([]bool, N)
 		for pb.Next() {
 			mu.Lock()
 			mu.Unlock()
