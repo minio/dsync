@@ -185,7 +185,7 @@ func TestSimpleLock(t *testing.T) {
 
 	dm.Lock()
 
-	fmt.Println("Lock acquired, waiting...")
+	// fmt.Println("Lock acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm.Unlock()
@@ -227,14 +227,14 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 	// Release lock after 10 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
-		fmt.Println("Unlocking dm1")
+		// fmt.Println("Unlocking dm1")
 
 		dm1st.Unlock()
 	}()
 
 	dm2nd.Lock()
 
-	fmt.Printf("2nd lock obtained after 1st lock is released\n")
+	// fmt.Printf("2nd lock obtained after 1st lock is released\n")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm2nd.Unlock()
@@ -252,7 +252,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	// Release lock after 10 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
-		fmt.Println("Unlocking dm1")
+		// fmt.Println("Unlocking dm1")
 
 		dm1st.Unlock()
 	}()
@@ -268,14 +268,14 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 		// Release lock after 10 seconds
 		go func() {
 			time.Sleep(2500 * time.Millisecond)
-			fmt.Println("Unlocking dm2")
+			// fmt.Println("Unlocking dm2")
 
 			dm2nd.Unlock()
 		}()
 
 		dm3rd.Lock()
 
-		fmt.Printf("3rd lock obtained after 1st & 2nd locks are released\n")
+		// fmt.Printf("3rd lock obtained after 1st & 2nd locks are released\n")
 		time.Sleep(2500 * time.Millisecond)
 
 		dm3rd.Unlock()
@@ -289,14 +289,14 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 		// Release lock after 10 seconds
 		go func() {
 			time.Sleep(2500 * time.Millisecond)
-			fmt.Println("Unlocking dm3")
+			// fmt.Println("Unlocking dm3")
 
 			dm3rd.Unlock()
 		}()
 
 		dm2nd.Lock()
 
-		fmt.Printf("2nd lock obtained after 1st & 3rd locks are released\n")
+		// fmt.Printf("2nd lock obtained after 1st & 3rd locks are released\n")
 		time.Sleep(2500 * time.Millisecond)
 
 		dm2nd.Unlock()
@@ -314,7 +314,7 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 	dm1.Lock()
 	dm2.Lock()
 
-	fmt.Println("Both locks acquired, waiting...")
+	// fmt.Println("Both locks acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm1.Unlock()

@@ -32,27 +32,27 @@ func TestSimpleWriteLock(t *testing.T) {
 	drwm := NewDRWMutex("resource")
 
 	drwm.RLock()
-	fmt.Println("1st read lock acquired, waiting...")
+	// fmt.Println("1st read lock acquired, waiting...")
 
 	drwm.RLock()
-	fmt.Println("2nd read lock acquired, waiting...")
+	// fmt.Println("2nd read lock acquired, waiting...")
 
 	go func() {
 		time.Sleep(1000 * time.Millisecond)
 		drwm.RUnlock()
-		fmt.Println("1st read lock released, waiting...")
+		// fmt.Println("1st read lock released, waiting...")
 	}()
 
 	go func() {
 		time.Sleep(2000 * time.Millisecond)
 		drwm.RUnlock()
-		fmt.Println("2nd read lock released, waiting...")
+		// fmt.Println("2nd read lock released, waiting...")
 	}()
 
-	fmt.Println("Trying to acquire write lock, waiting...")
+	// fmt.Println("Trying to acquire write lock, waiting...")
 	drwm.Lock()
 
-	fmt.Println("Write lock acquired, waiting...")
+	// fmt.Println("Write lock acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
 
 	drwm.Unlock()
