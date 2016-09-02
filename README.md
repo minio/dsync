@@ -190,15 +190,29 @@ Issues
 * When two nodes want to acquire the same lock, it is possible for both to just acquire `n` locks and there is no majority winner so both would fail (and presumably fail back to their clients?). This then requires a retry in order to acquire the lock at a later time.
 * What if late acquire response still comes in after lock has been obtained (quorum is in) and has already been released again. 
 
-Comparison to other techniques
-------------------------------
 
-We are well aware that there are more sophisticated systems such as zookeeper, raft, etc but we found that for our limited use case this was adding too much complexity. So if `dsync` does not meet your requirements than you are probably better off using one of those systems.
 
 Extensions / Other use cases
 ----------------------------
 
-Depending on your use case and how resilient you want to be for outages of servers, strictly speaking it is not necessarily needed to acquire a lock from all connected nodes. For instance one could imagine a system of 64 servers where only a quorom majority out of `8` would be needed (thus minimally 5 locks granted out of 8 servers). This would require some sort of pseudo-random 'deterministic' selection of 8 servers out of the total of 64 servers. A simple hashing of the resource name could be use to derive a deterministic set of 8 servers which would then be contacted.
+### Robustness vs Performance
+
+It is possible to trade some level of robustness with overall performance by not contacting each node for every Lock()/Unlock() cycle. In the normal case (example for `n = 16` nodes) a total of 32 RPC messages is sent and the lock is granted if at least a quorum of `n/2 + 1` nodes respond positively. When all nodes are functioning normally this would mean `n = 16` positive responses and, in fact, `n/2 - 1 = 7` responses over the (minimum) quorum of `n/2 + 1 = 9`. So you could say that this is some overkill, meaning that if even 6 nodes are down you still have an extra node over the quorum.
+
+For this case it is possible to reduce the number of nodes to be contacted to for example `12`. Instead of 32 RPC messages now 24 message will be sent which is 25% less. As the performance is mostly depending on the number of RPC messages sent, the total locks/second handled by all nodes would increase by 33% (given the same CPU load).
+
+You do however want to make sure that you have some sort of 'random' selection of which 12 out of the 16 nodes will participate in every lock. See [here](https://gist.github.com/fwessels/dbbafd537c13ec8f88b360b3a0091ac0) for some sample code that could help with this.
+
+### Scale beyond 16 nodes?
+
+Building on the previous example and depending on how resilient you want to be for outages of nodes, you can also go the other way, namely to increase the total number of nodes while keeping the number of nodes contacted per lock the same.
+
+For instance you could imagine a system of 32 nodes where only a quorom majority of `9` would be needed out of `12` nodes. Again this requires some sort of pseudo-random 'deterministic' selection of 12 nodes out of the total of 32 servers (same [example](https://gist.github.com/fwessels/dbbafd537c13ec8f88b360b3a0091ac0) as above). 
+
+Comparison to other techniques
+------------------------------
+
+We are well aware that there are more sophisticated systems such as zookeeper, raft, etc. However we found that for our limited use case this was adding too much complexity. So if `dsync` does not meet your requirements than you are probably better off using one of those systems.
 
 License
 -------
