@@ -23,7 +23,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -43,7 +42,6 @@ type DRWMutex struct {
 	Name      string
 	locks     []bool     // Array of nodes that granted a lock
 	m         sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
-	singleUse int64      // Atomic counter to prevent more than one simultaneous call to either Lock() or RLock()
 }
 
 type Granted struct {
@@ -72,19 +70,7 @@ func NewDRWMutex(name string) *DRWMutex {
 	}
 }
 
-// preventSimultaneousCalls double checks that no more than one call can be active for Lock() and RLock()
-func (dm *DRWMutex) preventSimultaneousCalls() {
-	// Do not allow more than one simultaneous call to Lock() or RLock()
-	if atomic.AddInt64(&dm.singleUse, 1) > 1 {
-		panic("More than one simultaneous Lock() or RLock() on same object is not allowed -- use different DRWMutex objects instead")
-	}
-}
 
-// releaseSingleUse decrease the atomic counter to zero again
-func (dm *DRWMutex) releaseSingleUse() {
-	if atomic.AddInt64(&dm.singleUse, -1) != 0 {
-		panic("Atomic counter should always be zero upon release")
-	}
 }
 
 // RLock holds a read lock on dm.
@@ -92,10 +78,6 @@ func (dm *DRWMutex) releaseSingleUse() {
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (dm *DRWMutex) RLock() {
-
-	// Prevent more than one simultaneous call to Lock() or RLock()
-	dm.preventSimultaneousCalls()
-	defer dm.releaseSingleUse()
 
 	// Shield RLock() with local mutex in order to prevent more than
 	// one broadcast going out at the same time from this node
@@ -138,10 +120,6 @@ func (dm *DRWMutex) RLock() {
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (dm *DRWMutex) Lock() {
-
-	// Prevent more than one simultaneous call to Lock() or RLock()
-	dm.preventSimultaneousCalls()
-	defer dm.releaseSingleUse()
 
 	// Shield Lock() with local mutex in order to prevent more than
 	// one broadcast going out at the same time from this node
