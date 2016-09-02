@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-package dsync
+package dsync_test
 
 import (
 	"net/rpc"
 	"sync"
 	"time"
+	. "github.com/minio/dsync"
 )
 
 // RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.

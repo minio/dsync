@@ -16,7 +16,7 @@
 
 // GOMAXPROCS=10 go test
 
-package dsync
+package dsync_test
 
 import (
 	"errors"
@@ -31,6 +31,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	. "github.com/minio/dsync"
 )
 
 const N = 4           // number of lock servers for tests.

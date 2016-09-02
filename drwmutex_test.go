@@ -16,7 +16,7 @@
 
 // GOMAXPROCS=10 go test
 
-package dsync
+package dsync_test
 
 import (
 	"fmt"
@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	. "github.com/minio/dsync"
 )
 
 func TestSimpleWriteLock(t *testing.T) {
