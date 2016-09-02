@@ -207,3 +207,49 @@ func TestDRLocker(t *testing.T) {
 		wl.Unlock()
 	}
 }
+
+// Borrowed from rwmutex_test.go
+func TestUnlockPanic(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("unlock of unlocked RWMutex did not panic")
+		}
+	}()
+	mu := NewDRWMutex("test")
+	mu.Unlock()
+}
+
+// Borrowed from rwmutex_test.go
+func TestUnlockPanic2(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("unlock of unlocked RWMutex did not panic")
+		}
+	}()
+	mu := NewDRWMutex("test")
+	mu.RLock()
+	mu.Unlock()
+}
+
+// Borrowed from rwmutex_test.go
+func TestRUnlockPanic(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("read unlock of unlocked RWMutex did not panic")
+		}
+	}()
+	mu  := NewDRWMutex("test")
+	mu.RUnlock()
+}
+
+// Borrowed from rwmutex_test.go
+func TestRUnlockPanic2(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("read unlock of unlocked RWMutex did not panic")
+		}
+	}()
+	mu := NewDRWMutex("test")
+	mu.Lock()
+	mu.RUnlock()
+}

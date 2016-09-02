@@ -263,14 +263,14 @@ func releaseAll(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) {
 func (dm *DRWMutex) Unlock() {
 
 	// Check if minimally a single bool is set in the writeLocks array
-	var index int
-	var b bool
-	for index, b = range dm.writeLocks {
+	lockFound := false
+	for _, b := range dm.writeLocks {
 		if b {
+			lockFound = true
 			break
 		}
 	}
-	if index == len(dm.writeLocks) {
+	if !lockFound {
 		panic("Trying to Unlock() while no Lock() is active")
 	}
 
