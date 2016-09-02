@@ -304,10 +304,6 @@ func (dm *DRWMutex) RUnlock() {
 
 func unlock(locks *[]bool, name string, isReadLock bool) {
 
-	// We don't panic like sync.Mutex, when an unlock is issued on an
-	// un-locked lock, since the lock rpc server may have restarted and
-	// "forgotten" about the lock.
-
 	// We don't need to synchronously wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get quorum)
 
