@@ -11,9 +11,9 @@ Introduction
 Motivation
 ----------
 
-This package was developed for the distributed server version of the [Minio Object Storage](https://minio.io/). For this we needed a distributed locking mechanism for up to 16 servers that each would be running `minio server`. The locking mechanism itself should be a reader/writer mutual exclusion lock meaning that it can be held by a single writer or an arbitrary number of readers.
+This package was developed for the distributed server version of [Minio Object Storage](https://minio.io/). For this we needed a distributed locking mechanism for up to 16 servers that each would be running `minio server`. The locking mechanism itself should be a reader/writer mutual exclusion lock meaning that it can be held by a single writer or an arbitrary number of readers.
 
-In [minio](https://minio.io/) the distributed version is started as follows (for a 6-server system):
+For [minio](https://minio.io/) the distributed version is started as follows (for a 6-server system):
 
 ```
 $ minio server server1/disk server2/disk server3/disk server4/disk server5/disk server6/disk 
@@ -24,10 +24,10 @@ _(note that the same identical command should be run on servers `server1` throug
 Design goals
 ------------
 
-* Implements [`sync/Locker`](https://github.com/golang/go/blob/master/src/sync/mutex.go#L30) interface (for exclusive lock)
-* Simple design: by keeping the design simple, many tricky edge cases can be avoided.
-* No master node: there is no concept of a master node which, if this would be used and the master would be down, causes locking to come to a complete stop. (Unless you have a design with a slave node but this adds yet more complexity.)
-* Resilient: if one or more nodes go down, the other nodes should not be affected and can continue to acquire locks (provided not more than `n/2 - 1` nodes are down).
+* **Simple design**: by keeping the design simple, many tricky edge cases can be avoided.
+* **No master node**: there is no concept of a master node which, if this would be used and the master would be down, causes locking to come to a complete stop. (Unless you have a design with a slave node but this adds yet more complexity.)
+* **Resilient**: if one or more nodes go down, the other nodes should not be affected and can continue to acquire locks (provided not more than `n/2 - 1` nodes are down).
+* Drop-in replacement for `sync.RWMutex` and supports [`sync.Locker`](https://github.com/golang/go/blob/master/src/sync/mutex.go#L30) interface.
 * Automatically reconnect to (restarted) nodes.
 
 Restrictions
@@ -35,7 +35,7 @@ Restrictions
 
 * Limited scalability: up to 16 nodes.
 * Fixed configuration: changes in the number and/or network names/IP addresses need a restart of all nodes in order to take effect.
-* If a down node comes up, it will not in any way (re)acquire any locks that it may have held.
+* If a down node comes up, it will not try to (re)acquire any locks that it may have held.
 * Not designed for high performance applications such as key/value stores.
 
 Performance
@@ -49,7 +49,7 @@ Usage
 
 ### Exclusive lock 
 
-Here is a simple case showing how to protect a single resource (drop-in replacement for `sync/mutex`):
+Here is a simple example showing how to protect a single resource (drop-in replacement for `sync.Mutex`):
 
 ```
 import (
@@ -58,44 +58,85 @@ import (
 
 func lockSameResource() {
 
-    // Two locks on same resource
-	dm1st := dsync.NewDRWMutex("test")
-	dm2nd := dsync.NewDRWMutex("test")
+    // Create distributed mutex to protect resource 'test'
+	dm := dsync.NewDRWMutex("test")
 
-	dm1st.Lock()
-    log.Println("dm1st locked")
+	dm.Lock()
+    log.Println("first lock granted")
 
 	// Release 1st lock after 5 seconds
 	go func() {
 		time.Sleep(5 * time.Second)
-		log.Println("dm1st unlocked")
-		dm1st.Unlock()
+		log.Println("first lock unlocked")
+		dm.Unlock()
 	}()
 
-    // Try to acquire 2nd lock, will block until 1st lock is released
-    log.Println("about to lock dm2nd...")
-	dm2nd.Lock()
-    log.Println("dm2nd locked")
+    // Try to acquire lock again, will block until initial lock is released
+    log.Println("about to lock same resource again...")
+	dm.Lock()
+    log.Println("second lock granted")
 
 	time.Sleep(2 * time.Second)
-	dm2nd.Unlock()
+	dm.Unlock()
 }
 ```
 
-This gives the following results:
+which gives the following output:
 
 ```
-2016/09/01 15:53:03 dm1st locked
-2016/09/01 15:53:03 about to lock dm2nd...
-2016/09/01 15:53:08 dm1st unlocked
-2016/09/01 15:53:09 dm2nd locked
+2016/09/02 14:50:00 first lock granted
+2016/09/02 14:50:00 about to lock same resource again...
+2016/09/02 14:50:05 first lock unlocked
+2016/09/02 14:50:05 second lock granted
 ```
 
 ### Read locks
 
+DRWMutex also supports multiple simultaneous read locks as shown below (analogous to `sync.RWMutex`)
+
 ```
+func twoReadLocksAndSingleWriteLock() {
+
+	drwm := dsync.NewDRWMutex("resource")
+
+	drwm.RLock()
+	log.Println("1st read lock acquired, waiting...")
+
+	drwm.RLock()
+	log.Println("2nd read lock acquired, waiting...")
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		drwm.RUnlock()
+		log.Println("1st read lock released, waiting...")
+	}()
+
+	go func() {
+		time.Sleep(2 * time.Second)
+		drwm.RUnlock()
+		log.Println("2nd read lock released, waiting...")
+	}()
+
+	log.Println("Trying to acquire write lock, waiting...")
+	drwm.Lock()
+	log.Println("Write lock acquired, waiting...")
+	
+	time.Sleep(3 * time.Second)
+
+	drwm.Unlock()
+}
 ```
 
+which gives the following output:
+
+```
+2016/09/02 15:05:20 1st read lock acquired, waiting...
+2016/09/02 15:05:20 2nd read lock acquired, waiting...
+2016/09/02 15:05:20 Trying to acquire write lock, waiting...
+2016/09/02 15:05:22 1st read lock released, waiting...
+2016/09/02 15:05:24 2nd read lock released, waiting...
+2016/09/02 15:05:24 Write lock acquired, waiting...
+```
 
 Dealing with Stale Locks
 ------------------------
@@ -197,7 +238,7 @@ Extensions / Other use cases
 
 ### Robustness vs Performance
 
-It is possible to trade some level of robustness with overall performance by not contacting each node for every Lock()/Unlock() cycle. In the normal case (example for `n = 16` nodes) a total of 32 RPC messages is sent and the lock is granted if at least a quorum of `n/2 + 1` nodes respond positively. When all nodes are functioning normally this would mean `n = 16` positive responses and, in fact, `n/2 - 1 = 7` responses over the (minimum) quorum of `n/2 + 1 = 9`. So you could say that this is some overkill, meaning that if even 6 nodes are down you still have an extra node over the quorum.
+It is possible to trade some level of robustness with overall performance by not contacting each node for every Lock()/Unlock() cycle. In the normal case (example for `n = 16` nodes) a total of 32 RPC messages is sent and the lock is granted if at least a quorum of `n/2 + 1` nodes respond positively. When all nodes are functioning normally this would mean `n = 16` positive responses and, in fact, `n/2 - 1 = 7` responses over the (minimum) quorum of `n/2 + 1 = 9`. So you could say that this is some overkill, meaning that even if 6 nodes are down you still have an extra node over the quorum.
 
 For this case it is possible to reduce the number of nodes to be contacted to for example `12`. Instead of 32 RPC messages now 24 message will be sent which is 25% less. As the performance is mostly depending on the number of RPC messages sent, the total locks/second handled by all nodes would increase by 33% (given the same CPU load).
 
