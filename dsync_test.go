@@ -16,7 +16,7 @@
 
 // GOMAXPROCS=10 go test
 
-package dsync
+package dsync_test
 
 import (
 	"errors"
@@ -31,6 +31,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	. "github.com/minio/dsync"
 )
 
 const N = 4           // number of lock servers for tests.
@@ -40,11 +41,12 @@ var rpcPaths []string // list of rpc paths where lock server is serving.
 // used when cached timestamp do not match with what client remembers.
 var errInvalidTimestamp = errors.New("Timestamps don't match, server may have restarted.")
 
+const WriteLock = -1
+
 type lockServer struct {
-	mutex sync.Mutex
-	// e.g, when a Lock(name) is held, map[string][]bool{"name" : []bool{true}}
-	// when one or more RLock() is held, map[string][]bool{"name" : []bool{false, false}}
-	lockMap   map[string][]bool
+	mutex   sync.Mutex
+	lockMap map[string]int64 // Map of locks, with negative value indicating (exclusive) write lock
+							 // and positive values indicating number of read locks
 	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
 
@@ -65,15 +67,10 @@ func (l *lockServer) Lock(args *LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	_, ok := l.lockMap[args.Name]
-	// No locks held on the given name.
-	if !ok {
-		*reply = true
-		l.lockMap[args.Name] = []bool{true}
-	} else {
-		// Either a read or write lock is held on the given name.
-		*reply = false
+	if _, *reply = l.lockMap[args.Name]; !*reply {
+		l.lockMap[args.Name] = WriteLock // No locks held on the given name, so claim write lock
 	}
+	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
 	return nil
 }
 
@@ -83,20 +80,18 @@ func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	locksHeld, ok := l.lockMap[args.Name]
-	// No lock is held on the given name, there must be some issue at the lock client side.
-	if !ok {
-		*reply = false
-		return fmt.Errorf("Unlock attempted on an un-locked entity: %s", args.Name)
-	} else if len(locksHeld) == 1 && locksHeld[0] == true {
-		*reply = true
-		delete(l.lockMap, args.Name)
-		return nil
-	} else {
-		*reply = false
-		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, len(locksHeld))
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+		return fmt.Errorf("Unlock attempted on an unlocked entity: %s", args.Name)
 	}
+	if *reply = locksHeld == WriteLock; !*reply { // Unless it is a write lock
+		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, locksHeld)
+	}
+	delete(l.lockMap, args.Name) // Remove the write lock
+	return nil
 }
+
+const ReadLock = 1
 
 func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
 	l.mutex.Lock()
@@ -104,19 +99,14 @@ func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	locksHeld, ok := l.lockMap[args.Name]
-	// No locks held on the given name.
-	if !ok {
-		// First read-lock to be held on *name.
-		l.lockMap[args.Name] = []bool{false}
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply {
+		l.lockMap[args.Name] = ReadLock // No locks held on the given name, so claim (first) read lock
 		*reply = true
-	} else if len(locksHeld) == 1 && locksHeld[0] == true {
-		// A write-lock is held, read lock can't be granted.
-		*reply = false
 	} else {
-		// Add an entry for this read lock.
-		l.lockMap[args.Name] = append(locksHeld, false)
-		*reply = true
+		if *reply = locksHeld != WriteLock; *reply { // Unless there is a write lock
+			l.lockMap[args.Name] = locksHeld + ReadLock // Grant another read lock
+		}
 	}
 	return nil
 }
@@ -127,24 +117,17 @@ func (l *lockServer) RUnlock(args *LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	locksHeld, ok := l.lockMap[args.Name]
-	if !ok {
-		*reply = false
-		return fmt.Errorf("RUnlock attempted on an un-locked entity: %s", args.Name)
-	} else if len(locksHeld) == 1 && locksHeld[0] == true {
-		// A write-lock is held, cannot release a read lock
-		*reply = false
+	var locksHeld int64
+	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+		return fmt.Errorf("RUnlock attempted on an unlocked entity: %s", args.Name)
+	}
+	if *reply = locksHeld != WriteLock; !*reply { // A write-lock is held, cannot release a read lock
 		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
-	} else if len(locksHeld) > 1 {
-		// Remove one of the read locks held.
-		locksHeld = locksHeld[1:]
-		l.lockMap[args.Name] = locksHeld
-		*reply = true
+	}
+	if locksHeld > ReadLock {
+		l.lockMap[args.Name] = locksHeld - ReadLock // Remove one of the read locks held
 	} else {
-		// Delete the map entry since this is the last read lock held
-		// on *name.
-		delete(l.lockMap, args.Name)
-		*reply = true
+		delete(l.lockMap, args.Name) // Remove the (last) read lock
 	}
 	return nil
 }
@@ -155,7 +138,7 @@ func startRPCServers(nodes []string) {
 		server := rpc.NewServer()
 		server.RegisterName("Dsync", &lockServer{
 			mutex:   sync.Mutex{},
-			lockMap: make(map[string][]bool),
+			lockMap: make(map[string]int64),
 		})
 		// For some reason the registration paths need to be different (even for different server objs)
 		server.HandleHTTP(rpcPaths[i], fmt.Sprintf("%s-debug", rpcPaths[i]))
@@ -203,7 +186,7 @@ func TestSimpleLock(t *testing.T) {
 
 	dm.Lock()
 
-	fmt.Println("Lock acquired, waiting...")
+	// fmt.Println("Lock acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm.Unlock()
@@ -245,14 +228,14 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 	// Release lock after 10 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
-		fmt.Println("Unlocking dm1")
+		// fmt.Println("Unlocking dm1")
 
 		dm1st.Unlock()
 	}()
 
 	dm2nd.Lock()
 
-	fmt.Printf("2nd lock obtained after 1st lock is released\n")
+	// fmt.Printf("2nd lock obtained after 1st lock is released\n")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm2nd.Unlock()
@@ -270,13 +253,13 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	// Release lock after 10 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
-		fmt.Println("Unlocking dm1")
+		// fmt.Println("Unlocking dm1")
 
 		dm1st.Unlock()
 	}()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
@@ -286,17 +269,38 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 		// Release lock after 10 seconds
 		go func() {
 			time.Sleep(2500 * time.Millisecond)
-			fmt.Println("Unlocking dm2")
+			// fmt.Println("Unlocking dm2")
 
 			dm2nd.Unlock()
 		}()
 
 		dm3rd.Lock()
 
-		fmt.Printf("3rd lock obtained after 1st & 2nd locks are released\n")
+		// fmt.Printf("3rd lock obtained after 1st & 2nd locks are released\n")
 		time.Sleep(2500 * time.Millisecond)
 
 		dm3rd.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		dm3rd.Lock()
+
+		// Release lock after 10 seconds
+		go func() {
+			time.Sleep(2500 * time.Millisecond)
+			// fmt.Println("Unlocking dm3")
+
+			dm3rd.Unlock()
+		}()
+
+		dm2nd.Lock()
+
+		// fmt.Printf("2nd lock obtained after 1st & 3rd locks are released\n")
+		time.Sleep(2500 * time.Millisecond)
+
+		dm2nd.Unlock()
 	}()
 
 	wg.Wait()
@@ -311,7 +315,7 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 	dm1.Lock()
 	dm2.Lock()
 
-	fmt.Println("Both locks acquired, waiting...")
+	// fmt.Println("Both locks acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
 
 	dm1.Unlock()
@@ -332,8 +336,8 @@ func HammerMutex(m *DRWMutex, loops int, cdone chan bool) {
 // Borrowed from mutex_test.go
 func TestMutex(t *testing.T) {
 	c := make(chan bool)
+	m := NewDRWMutex("test")
 	for i := 0; i < 10; i++ {
-		m := NewDRWMutex("test")
 		go HammerMutex(m, 1000, c)
 	}
 	for i := 0; i < 10; i++ {
@@ -348,7 +352,6 @@ func BenchmarkMutexUncontended(b *testing.B) {
 	}
 	b.RunParallel(func(pb *testing.PB) {
 		var mu PaddedMutex
-		mu.locks = make([]bool, N)
 		for pb.Next() {
 			mu.Lock()
 			mu.Unlock()
