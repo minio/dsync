@@ -23,7 +23,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -40,10 +39,10 @@ const DRWMutexAcquireTimeout = 25 * time.Millisecond // 25ms.
 
 // A DRWMutex is a distributed mutual exclusion lock.
 type DRWMutex struct {
-	Name      string
-	locks     []bool     // Array of nodes that granted a lock
-	m         sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
-	singleUse int64      // Atomic counter to prevent more than one simultaneous call to either Lock() or RLock()
+	Name         string
+	writeLocks   []bool     // Array of nodes that granted a write lock
+	readersLocks [][]bool   // Array of array of nodes that granted reader locks
+	m            sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 }
 
 type Granted struct {
@@ -67,99 +66,58 @@ func (l *LockArgs) SetTimestamp(tstamp time.Time) {
 
 func NewDRWMutex(name string) *DRWMutex {
 	return &DRWMutex{
-		Name:  name,
-		locks: make([]bool, dnodeCount),
+		Name:       name,
+		writeLocks: make([]bool, dnodeCount),
 	}
 }
 
-// preventSimultaneousCalls double checks that no more than one call can be active for Lock() and RLock()
-func (dm *DRWMutex) preventSimultaneousCalls() {
-	// Do not allow more than one simultaneous call to Lock() or RLock()
-	if atomic.AddInt64(&dm.singleUse, 1) > 1 {
-		panic("More than one simultaneous Lock() or RLock() on same object is not allowed -- use different DRWMutex objects instead")
-	}
-}
+// Lock holds a write lock on dm.
+//
+// If the lock is already in use, the calling go routine
+// blocks until the mutex is available.
+func (dm *DRWMutex) Lock() {
 
-// releaseSingleUse decrease the atomic counter to zero again
-func (dm *DRWMutex) releaseSingleUse() {
-	if atomic.AddInt64(&dm.singleUse, -1) != 0 {
-		panic("Atomic counter should always be zero upon release")
-	}
+	isReadLock := false
+	dm.lockBlocking(isReadLock)
 }
 
 // RLock holds a read lock on dm.
 //
-// If the lock is already in use, the calling goroutine
-// blocks until the mutex is available.
+// If one or more read lock are already in use, it will grant another lock.
+// Otherwise the calling go routine blocks until the mutex is available.
 func (dm *DRWMutex) RLock() {
 
-	// Prevent more than one simultaneous call to Lock() or RLock()
-	dm.preventSimultaneousCalls()
-	defer dm.releaseSingleUse()
-
-	// Shield RLock() with local mutex in order to prevent more than
-	// one broadcast going out at the same time from this node
-	dm.m.Lock()
-	defer dm.m.Unlock()
-
-	runs, backOff := 1, 1
-
-	for {
-
-		// create temp arrays on stack
-		locks := make([]bool, dnodeCount)
-
-		// try to acquire the lock
-		isReadLock := true
-		success := lock(clnts, &locks, dm.Name, isReadLock)
-		if success {
-			// if success, copy array to object
-			copy(dm.locks, locks[:])
-			return
-		}
-
-		// We timed out on the previous lock, incrementally wait for a longer back-off time,
-		// and try again afterwards
-		time.Sleep(time.Duration(backOff) * time.Millisecond)
-
-		backOff += int(rand.Float64() * math.Pow(2, float64(runs)))
-		if backOff > 1024 {
-			backOff = backOff % 64
-
-			runs = 1 // reset runs
-		} else if runs < 10 {
-			runs++
-		}
-	}
+	isReadLock := true
+	dm.lockBlocking(isReadLock)
 }
 
-// Lock locks dm.
+// lockBlocking will acquire either a read or a write lock
 //
-// If the lock is already in use, the calling goroutine
-// blocks until the mutex is available.
-func (dm *DRWMutex) Lock() {
-
-	// Prevent more than one simultaneous call to Lock() or RLock()
-	dm.preventSimultaneousCalls()
-	defer dm.releaseSingleUse()
-
-	// Shield Lock() with local mutex in order to prevent more than
-	// one broadcast going out at the same time from this node
-	dm.m.Lock()
-	defer dm.m.Unlock()
+// The call will block until the lock is granted using a built-in
+// timing randomized back-off algorithm to try again until successful
+func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 	runs, backOff := 1, 1
 
 	for {
-		// create temp arrays on stack
+		// create temp array on stack
 		locks := make([]bool, dnodeCount)
 
 		// try to acquire the lock
-		isReadLock := false
 		success := lock(clnts, &locks, dm.Name, isReadLock)
 		if success {
 			// if success, copy array to object
-			copy(dm.locks, locks[:])
+			if isReadLock {
+				dm.m.Lock()
+				defer dm.m.Unlock()
+				// append new array of bools at the end
+				dm.readersLocks = append(dm.readersLocks, make([]bool, dnodeCount))
+				// and copy stack array into last spot
+				copy(dm.readersLocks[len(dm.readersLocks)-1], locks[:])
+			} else {
+				copy(dm.writeLocks, locks[:])
+			}
+
 			return
 		}
 
@@ -297,52 +255,65 @@ func releaseAll(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) {
 			(*locks)[lock] = false
 		}
 	}
+}
 
+// Unlock unlocks the write lock.
+//
+// It is a run-time error if dm is not locked on entry to Unlock.
+func (dm *DRWMutex) Unlock() {
+
+	// Check if minimally a single bool is set in the writeLocks array
+	lockFound := false
+	for _, b := range dm.writeLocks {
+		if b {
+			lockFound = true
+			break
+		}
+	}
+	if !lockFound {
+		panic("Trying to Unlock() while no Lock() is active")
+	}
+
+	isReadLock := false
+	unlock(&dm.writeLocks, dm.Name, isReadLock)
 }
 
 // RUnlock releases a read lock held on dm.
 //
 // It is a run-time error if dm is not locked on entry to RUnlock.
 func (dm *DRWMutex) RUnlock() {
-	// We don't panic like sync.Mutex, when an unlock is issued on an
-	// un-locked lock, since the lock rpc server may have restarted and
-	// "forgotten" about the lock.
 
-	// We don't need to wait until we have released all the locks (or the quorum)
-	// (a subsequent lock will retry automatically in case it would fail to get
-	//  quorum)
-	for index, c := range clnts {
+	// create temp array on stack
+	locks := make([]bool, dnodeCount)
 
-		if dm.locks[index] {
-			// broadcast lock release to all nodes the granted the lock
-			isReadLock := true
-			sendRelease(c, dm.Name, isReadLock)
-
-			dm.locks[index] = false
+	{
+		dm.m.Lock()
+		defer dm.m.Unlock()
+		if len(dm.readersLocks) == 0 {
+			panic("Trying to RUnlock() while no RLock() is active")
 		}
+		// Copy out first element to release it first (FIFO)
+		copy(locks, dm.readersLocks[0][:])
+		// Drop first element from array
+		dm.readersLocks = dm.readersLocks[1:]
 	}
+
+	isReadLock := true
+	unlock(&locks, dm.Name, isReadLock)
 }
 
-// Unlock unlocks dm.
-//
-// It is a run-time error if dm is not locked on entry to Unlock.
-func (dm *DRWMutex) Unlock() {
+func unlock(locks *[]bool, name string, isReadLock bool) {
 
-	// We don't panic like sync.Mutex, when an unlock is issued on an
-	// un-locked lock, since the lock rpc server may have restarted and
-	// "forgotten" about the lock.
+	// We don't need to synchronously wait until we have released all the locks (or the quorum)
+	// (a subsequent lock will retry automatically in case it would fail to get quorum)
 
-	// We don't need to wait until we have released all the locks (or the quorum)
-	// (a subsequent lock will retry automatically in case it would fail to get
-	//  quorum)
 	for index, c := range clnts {
 
-		if dm.locks[index] {
+		if (*locks)[index] {
 			// broadcast lock release to all nodes the granted the lock
-			isReadLock := false
-			sendRelease(c, dm.Name, isReadLock)
+			sendRelease(c, name, isReadLock)
 
-			dm.locks[index] = false
+			(*locks)[index] = false
 		}
 	}
 }
@@ -400,3 +371,14 @@ func sendRelease(c RPC, name string, isReadLock bool) {
 		}
 	}(c, name)
 }
+
+// DRLocker returns a sync.Locker interface that implements
+// the Lock and Unlock methods by calling drw.RLock and drw.RUnlock.
+func (dm *DRWMutex) DRLocker() sync.Locker {
+	return (*drlocker)(dm)
+}
+
+type drlocker DRWMutex
+
+func (dr *drlocker) Lock()   { (*DRWMutex)(dr).RLock() }
+func (dr *drlocker) Unlock() { (*DRWMutex)(dr).RUnlock() }
