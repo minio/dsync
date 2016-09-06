@@ -298,12 +298,12 @@ func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
 // testClientThatHasLockCrashes verifies that multiple stale locks will prevent a new lock on same resource
 //
 // Specific deficiency: lock can no longer be acquired although resource is not locked
-func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
+func testClientThatHasLockCrashesKnownError(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testClientThatHasLockCrashes")
+	log.Println("**STARTING** testClientThatHasLockCrashesKnownError")
 
 	// lock is acquired
 	dmCreateStaleLocks := dsync.NewDRWMutex("test-stale")
@@ -335,7 +335,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 		log.Println("Timed out")
 	}
 
-	log.Println("**PASSED WITH KNOWN ERROR** testClientThatHasLockCrashes")
+	log.Println("**PASSED WITH KNOWN ERROR** testClientThatHasLockCrashesKnownError")
 }
 
 func main() {
@@ -388,53 +388,9 @@ func main() {
 	testMultipleServersOverQuorumDownDuringLockKnownError(&wg)
 	wg.Wait()
 
-	/*	// Start server
-		startRPCServer(*portFlag)
-
-		dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d", *portFlag))
-
-		timeStart := time.Now()
-		timeLast := time.Now()
-		durationMax := float64(0.0)
-
-		done := false
-
-		// Catch Ctrl-C and abort gracefully with release of locks
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-		go func() {
-			for sig := range c {
-				fmt.Println("Ctrl-C intercepted", sig)
-				done = true
-			}
-		}()
-
-		var run int
-		for run = 1; !done && run < 10000; run++ {
-			dm.Lock()
-
-			if run == 1 { // re-initialize timing info to account for initial delay to start all nodes
-				timeStart = time.Now()
-				timeLast = time.Now()
-			}
-
-			duration := time.Since(timeLast)
-			if durationMax < duration.Seconds() || run%100 == 0 {
-				if durationMax < duration.Seconds() {
-					durationMax = duration.Seconds()
-				}
-				fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(timeStart).Seconds()/float64(run), "\n*****")
-			}
-			timeLast = time.Now()
-			fmt.Println(*portFlag, "locked", time.Now())
-
-			// time.Sleep(1 * time.Millisecond)
-
-			dm.Unlock()
-		}
-
-		fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(timeStart).Seconds()/float64(run), "\n*****\nLocks/sec: ", 1.0 / (time.Since(timeStart).Seconds()/float64(run)), "\n*****")
-	*/
+	wg.Add(1)
+	testClientThatHasLockCrashesKnownError(&wg)
+	wg.Wait()
 }
 
 func countProcesses(name string) bool {
@@ -482,22 +438,3 @@ func killProcess(cmd *exec.Cmd) {
 		log.Fatal("failed to kill: ", err)
 	}
 }
-
-/*	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-	select {
-	case <-time.After(20 * time.Second):
-		if err := cmd.Process.Kill(); err != nil {
-			log.Fatal("failed to kill: ", err)
-		}
-		log.Println("process killed as timeout reached")
-	case err := <-done:
-		if err != nil {
-			log.Printf("process done with error = %v", err)
-		} else {
-			log.Print("process done gracefully without error")
-		}
-	}
-*/
