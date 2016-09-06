@@ -41,10 +41,6 @@ func (l *lockServer) verifyArgs(args *LockArgs) error {
 	if !l.timestamp.Equal(args.Timestamp) {
 		return errInvalidTimestamp
 	}
-	// disabled for test framework
-	//if !isRPCTokenValid(args.Token) {
-	//	return errInvalidToken
-	//}
 	return nil
 }
 
