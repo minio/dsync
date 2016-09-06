@@ -268,7 +268,7 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 
 }
 
-// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock on same resource
+// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
 //
 // Specific deficiency: lock can no longer be granted although resource is not locked
 func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
@@ -289,6 +289,7 @@ func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
 	// lock is released
 	// client that has lock dies (so unlock retries /w back-off mechanism stop)
 	// network connection is repaired to lost servers
+
 	// client is restarted
 
 	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
