@@ -64,3 +64,8 @@ Here is a table with some measurements on AWS/EC2:
 | EC2 Instance Type | Servers |     Locks/server/sec | Total Locks/sec | CPU Usage |
 | ----------------- | -------:| --------------------:| ---------------:| ---------:|
 | c3.2xlarge        |       8 | (min=1423, max=1518) |           11765 |       40% |
+
+Tweaking
+--------
+
+By changing the number of parallel loops to get locks (`parallel := 5`) you can influence the overall CPU load.

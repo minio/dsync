@@ -48,11 +48,11 @@ var (
 	rpcPaths []string
 )
 
-func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int) {
+func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
 	defer w.Done()
 	dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d-%d", *portFlag, nr))
 
-	durationMax := float64(0.0)
+	delayMax := float64(0.0)
 	timeLast := time.Now()
 	var run int
 	for run = 1; !*done && run <= runs; run++ {
@@ -64,15 +64,17 @@ func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr 
 		}
 
 		duration := time.Since(timeLast)
-		if durationMax < duration.Seconds() || run%100 == 0 {
-			if durationMax < duration.Seconds() {
-				durationMax = duration.Seconds()
+		if delayMax < duration.Seconds() || run%100 == 0 {
+			if delayMax < duration.Seconds() {
+				delayMax = duration.Seconds()
 			}
-			fmt.Println("*****\nMax duration: ", durationMax, "\n*****\nAvg duration: ", time.Since(*timeStart).Seconds()/float64(run), "\n*****")
+			fmt.Print(".")
 		}
 		timeLast = time.Now()
 		dm.Unlock()
 	}
+
+	ch <- delayMax
 }
 
 func startRPCServer(port int) {
@@ -132,19 +134,39 @@ func main() {
 		}
 	}()
 
+	runs := 40000
 	parallel := 5
 	wait := sync.WaitGroup{}
 	wait.Add(parallel)
 
+	// Create channel to get back max delay
+	ch := make(chan float64, parallel)
+
+	fmt.Println("Test starting...")
+
 	for i := 0; i < parallel; i++ {
-		go lockLoop(&wait, &timeStart, 40000, &done, i)
+		go lockLoop(&wait, &timeStart, runs, &done, i, ch)
 	}
-	runs := 40000 * parallel
+	totalRuns := runs * parallel
 
 	wait.Wait()
+	close(ch)
 
-	fmt.Println("*****\n*****\n*****\nLocks/sec: ", 1.0/(time.Since(timeStart).Seconds()/float64(runs)), "\n*****\nMsgs/sec: ", float64(len(nodes))*2.0*1.0/(time.Since(timeStart).Seconds()/float64(runs)))
+	delayMax := float64(0.0)
+	for c := range ch {
+		if delayMax < c {
+			delayMax = c
+		}
+	}
 
-	// Let release messages get out
-	time.Sleep(10000 * time.Millisecond)
+	fmt.Println("")
+	fmt.Printf("        Locks/sec: %7.0f\n", 1.0/(time.Since(timeStart).Seconds()/float64(totalRuns)))
+	fmt.Printf("         Msgs/sec: %7.0f\n", float64(len(nodes))*2.0*1.0/(time.Since(timeStart).Seconds()/float64(totalRuns)))
+	fmt.Printf(" Worst case delay: %5.3f s\n", delayMax)
+
+	if !done {
+		// Let release messages get out
+		fmt.Println("Waiting for test to close...")
+		time.Sleep(10000 * time.Millisecond)
+	}
 }
