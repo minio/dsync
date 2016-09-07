@@ -41,8 +41,48 @@ Restrictions
 Performance
 -----------
 
-* Support up to a total of 4000 locks/second for maximum size of 16 nodes (consuming 10% CPU usage per server) on moderately powerful server hardware.
+* Support up to a total of 7500 locks/second for maximum size of 16 nodes (consuming 10% CPU usage per server) on moderately powerful server hardware.
 * Lock requests (successful) should not take longer than 1ms (provided decent network connection of 1 Gbit or more between the nodes).
+
+The tables below show detailed performance numbers. 
+
+### Performance with varying number of nodes
+
+This table shows test performance on the same (EC2) instance type but with a varying number of nodes:
+
+| EC2 Instance Type    | Nodes |     Locks/server/sec | Total Locks/sec | CPU Usage |
+| -------------------- | -----:| --------------------:| ---------------:| ---------:|
+| c3.2xlarge           |     4 | (min=3110, max=3376) |           12972 |       25% |
+| c3.2xlarge           |     8 | (min=1884, max=2096) |           15920 |       25% |
+| c3.2xlarge           |    12 | (min=1239, max=1558) |           16782 |       25% |
+| c3.2xlarge           |    16 |  (min=996, max=1391) |           19096 |       25% |
+
+The mix and max locks/server/sec gradually declines but due to the larger number of nodes the overall total number of locks rises steadily (at the same CPU usage level).
+
+### Performance with difference instance types
+
+This table shows test performance for a fixed number of 8 nodes on different EC2 instance types:
+
+| EC2 Instance Type    | Nodes |     Locks/server/sec | Total Locks/sec | CPU Usage |
+| -------------------- | -----:| --------------------:| ---------------:| ---------:|
+| c3.large (2 vCPU)    |     8 |  (min=823,  max=896) |            6876 |       75% |
+| c3.2xlarge (8 vCPU)  |     8 | (min=1884, max=2096) |           15920 |       25% |
+| c3.8xlarge (32 vCPU) |     8 | (min=2601, max=2898) |           21996 |       10% |
+
+With the rise in the number of cores the CPU load decreases and overall performance increases.
+
+### Stress test
+
+Stress test on a c3.8xlarge (32 vCPU) instance type:
+
+| EC2 Instance Type    | Nodes |     Locks/server/sec | Total Locks/sec | CPU Usage |
+| -------------------- | -----:| --------------------:| ---------------:| ---------:|
+| c3.8xlarge           |     8 | (min=2601, max=2898) |           21996 |       10% |
+| c3.8xlarge           |     8 | (min=4756, max=5227) |           39932 |       20% |
+| c3.8xlarge           |     8 | (min=7979, max=8517) |           65984 |       40% |
+| c3.8xlarge           |     8 | (min=9267, max=9469) |           74944 |       50% |
+
+The system can be pushed to 75K locks/sec at 50% CPU load.
 
 Usage
 -----
@@ -229,9 +269,7 @@ Issues
 * If one of the nodes that participated in the lock goes down, this is not a problem since (when it comes back online) the node that originally acquired the lock will still have it, and a request for a new lock will fail due to only `n/2` being available.
 * If two nodes go down and both participated in the lock then there is a chance that a new lock will acquire locks from `n/2 + 1` nodes and will success, so we would have two concurrent locks. One way to counter this would be to monitor the network connections from the nodes that originated the lock, and, upon losing a connection to a node that granted a lock, get a new lock from a free node.  
 * When two nodes want to acquire the same lock, it is possible for both to just acquire `n` locks and there is no majority winner so both would fail (and presumably fail back to their clients?). This then requires a retry in order to acquire the lock at a later time.
-* What if late acquire response still comes in after lock has been obtained (quorum is in) and has already been released again. 
-
-
+* What if late acquire response still comes in after lock has been obtained (quorum is in) and has already been released again.
 
 Extensions / Other use cases
 ----------------------------
