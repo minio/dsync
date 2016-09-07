@@ -19,7 +19,6 @@
 package dsync_test
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -37,100 +36,6 @@ import (
 const N = 4           // number of lock servers for tests.
 var nodes []string    // list of node IP addrs or hostname with ports.
 var rpcPaths []string // list of rpc paths where lock server is serving.
-
-// used when cached timestamp do not match with what client remembers.
-var errInvalidTimestamp = errors.New("Timestamps don't match, server may have restarted.")
-
-const WriteLock = -1
-
-type lockServer struct {
-	mutex   sync.Mutex
-	lockMap map[string]int64 // Map of locks, with negative value indicating (exclusive) write lock
-							 // and positive values indicating number of read locks
-	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
-}
-
-func (l *lockServer) verifyArgs(args *LockArgs) error {
-	if !l.timestamp.Equal(args.Timestamp) {
-		return errInvalidTimestamp
-	}
-	// disabled for test framework
-	//if !isRPCTokenValid(args.Token) {
-	//	return errInvalidToken
-	//}
-	return nil
-}
-
-func (l *lockServer) Lock(args *LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
-		return err
-	}
-	if _, *reply = l.lockMap[args.Name]; !*reply {
-		l.lockMap[args.Name] = WriteLock // No locks held on the given name, so claim write lock
-	}
-	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
-	return nil
-}
-
-func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
-		return err
-	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
-		return fmt.Errorf("Unlock attempted on an unlocked entity: %s", args.Name)
-	}
-	if *reply = locksHeld == WriteLock; !*reply { // Unless it is a write lock
-		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, locksHeld)
-	}
-	delete(l.lockMap, args.Name) // Remove the write lock
-	return nil
-}
-
-const ReadLock = 1
-
-func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
-		return err
-	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply {
-		l.lockMap[args.Name] = ReadLock // No locks held on the given name, so claim (first) read lock
-		*reply = true
-	} else {
-		if *reply = locksHeld != WriteLock; *reply { // Unless there is a write lock
-			l.lockMap[args.Name] = locksHeld + ReadLock // Grant another read lock
-		}
-	}
-	return nil
-}
-
-func (l *lockServer) RUnlock(args *LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
-		return err
-	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
-		return fmt.Errorf("RUnlock attempted on an unlocked entity: %s", args.Name)
-	}
-	if *reply = locksHeld != WriteLock; !*reply { // A write-lock is held, cannot release a read lock
-		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
-	}
-	if locksHeld > ReadLock {
-		l.lockMap[args.Name] = locksHeld - ReadLock // Remove one of the read locks held
-	} else {
-		delete(l.lockMap, args.Name) // Remove the (last) read lock
-	}
-	return nil
-}
 
 func startRPCServers(nodes []string) {
 
