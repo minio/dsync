@@ -1,12 +1,12 @@
 dsync
 =====
 
-A distributed sync package for Go.
+A distributed locking and syncing package for Go.
 
 Introduction
 ------------
  
-`dsync` is a package for doing distributed locks over a network of `n` nodes. It is designed with simplicity in mind and hence offers limited scalability (`n <= 16`). Each node will be connected to all other nodes and lock requests from any node will be broadcast to all connected nodes. A node will succeed in getting the lock if `n/2 + 1` nodes (whether or not including itself) respond positively. If the lock is acquired it can be held for as long as the client desired and needs to be released afterwards. This will cause the release to be broadcast to all nodes after which the lock becomes available again.
+`dsync` is a package for doing distributed locks over a network of `n` nodes. It is designed with simplicity in mind and hence offers limited scalability (`n <= 16`). Each node will be connected to all other nodes and lock requests from any node will be broadcast to all connected nodes. A node will succeed in getting the lock if `n/2 + 1` nodes (whether or not including itself) respond positively. If the lock is acquired it can be held for as long as the client desires and needs to be released afterwards. This will cause the release to be broadcast to all nodes after which the lock becomes available again.
 
 Motivation
 ----------
@@ -178,11 +178,78 @@ which gives the following output:
 2016/09/02 15:05:24 Write lock acquired, waiting...
 ```
 
+Basic architecture
+------------------
+
+### Lock process
+
+The basic steps in the lock process are as follows:
+- boardcast lock message to all `n` nodes
+- collect all responses within certain time-out window
+  - if quorum met (minimally `n/2 + 1` responded positively) then grant lock 
+  - otherwise release all underlying locks and try again after a (semi-)random delay
+- release any locks that (still) came in after time time-out window
+
+### Unlock process
+
+The unlock process is really simple:
+- boardcast unlock message to all nodes that granted lock
+- if a destination is not available, retry with gradually longer back-off window to still deliver
+- ignore the 'result' (cover for cases where destination node has gone down and came back up)
+
 Dealing with Stale Locks
 ------------------------
 
+A 'stale' lock would be a lock that is left at a node while the client that originally acquired the client either:
+- never released the lock (due to eg a crash) or
+- is disconnected from the network and henceforth not able to deliver the unlock message.
+
+Too many stale locks can prevent a new lock on a resource from being acquired, that is, if the sum of the stale locks and the number of down nodes is greater than `n/2 - 1`. In `dsync` a recovery mechanism is implemented to ultimately clear stale locks. 
+
 Known deficiencies
 ------------------
+
+Known deficiencies can be divided into two categories, namely a) more than one write lock granted and b) lock not becoming available anymore.
+
+### More than one write lock
+
+So far we have identified one case during which this can happen (example for 8 node system):
+- 3 nodes are down (say 6, 7, and 8)
+- node 1 acquires a lock on "test" (nodes 1 through to 5 giving quorum)
+- node 4 and 5 crash (dropping the lock)
+- nodes 4 through to 8 restart
+- node 4 acquires a lock on "test" (nodes 4 through to 8 giving quorum)
+
+Now we have two concurrent locks on the same resource name which violates the core requirement. Note that if just a single server out of 4 or 5 crashes that we are still fine because the second lock cannot acquire quorum.
+
+This table summarizes the conditions for different configurations during which this can happen:
+
+| Nodes | Down nodes | Crashed nodes | Total nodes |
+| -----:| ----------:| -------------:| -----------:|
+|     4 |          1 |             2 |           3 |
+|     8 |          3 |             2 |           5 |
+|    12 |          5 |             2 |           7 |
+|    16 |          7 |             2 |           9 |
+
+(for more info see `testMultipleServersOverQuorumDownDuringLockKnownError` in [chaos.go](https://github.com/minio/dsync/blob/master/chaos/chaos.go))
+ 
+### Lock not available anymore
+
+This would be due to too many stale locks and/or too many servers down (total over `n/2 - 1`). The following table shows the maximum toterable number for different node sizes:
+
+| Nodes |  Max tolerable |
+| -----:|  -------------:|
+|     4 |              1 |
+|     8 |              3 |
+|    12 |              5 |
+|    16 |              7 |
+
+If you see any other short comings, we would be interested in hearing about them.
+
+Tackled issues
+--------------
+
+* When two nodes want to acquire the same lock at precisely the same time, it is possible for both to just acquire `n/2` locks and there is no majority winner. Both will fail back to their clients and will retry later after a semi-randomized delay.
 
 Server side logic
 -----------------
@@ -262,14 +329,18 @@ func (l *lockServer) RUnlock(args *LockArgs, reply *bool) error {
 }
 ```
 
-Issues
-------
+See [dsync-server_test.go](https://github.com/fwessels/dsync/blob/master/dsync-server_test.go) for a full implementation.
 
-* In case the node that has the lock goes down, the lock release will not be broadcast: what do we do? (periodically ping 'back' to requesting node from all nodes that have the lock?) Or detect that the network connection has gone down. 
-* If one of the nodes that participated in the lock goes down, this is not a problem since (when it comes back online) the node that originally acquired the lock will still have it, and a request for a new lock will fail due to only `n/2` being available.
-* If two nodes go down and both participated in the lock then there is a chance that a new lock will acquire locks from `n/2 + 1` nodes and will success, so we would have two concurrent locks. One way to counter this would be to monitor the network connections from the nodes that originated the lock, and, upon losing a connection to a node that granted a lock, get a new lock from a free node.  
-* When two nodes want to acquire the same lock, it is possible for both to just acquire `n` locks and there is no majority winner so both would fail (and presumably fail back to their clients?). This then requires a retry in order to acquire the lock at a later time.
-* What if late acquire response still comes in after lock has been obtained (quorum is in) and has already been released again.
+Sub projects
+------------
+
+* See [performance](https://github.com/minio/dsync/tree/master/performance) directory for performance measurements
+* See [chaos](https://github.com/minio/dsync/tree/master/chaos) directory for some edge cases
+
+Testing
+-------
+
+The full test code (including benchmarks) from `sync/rwmutex_test.go` is used for testing purposes.
 
 Extensions / Other use cases
 ----------------------------
@@ -288,10 +359,19 @@ Building on the previous example and depending on how resilient you want to be f
 
 For instance you could imagine a system of 32 nodes where only a quorom majority of `9` would be needed out of `12` nodes. Again this requires some sort of pseudo-random 'deterministic' selection of 12 nodes out of the total of 32 servers (same [example](https://gist.github.com/fwessels/dbbafd537c13ec8f88b360b3a0091ac0) as above). 
 
-Comparison to other techniques
-------------------------------
+Other techniques
+----------------
 
 We are well aware that there are more sophisticated systems such as zookeeper, raft, etc. However we found that for our limited use case this was adding too much complexity. So if `dsync` does not meet your requirements than you are probably better off using one of those systems.
+
+Other links that you may find interesting:
+- [Distributed locks with Redis](http://redis.io/topics/distlock)
+- Based on the above: [Redis-based distributed mutual exclusion lock implementation for Go](https://github.com/hjr265/redsync.go)
+
+Performance of `net/rpc` vs `grpc`
+----------------------------------
+
+We did an analysis of the performance of `net/rpc` vs `grpc`, see [here](https://github.com/golang/go/issues/16844#issuecomment-245261755), so we'll stick with `net/rpc` for now.
 
 License
 -------
