@@ -59,11 +59,7 @@ Either build the `performance` program on each server or copy it over, and then 
 Performance 
 -----------
 
-Here is a table with some measurements on AWS/EC2:
-
-| EC2 Instance Type | Servers |     Locks/server/sec | Total Locks/sec | CPU Usage |
-| ----------------- | -------:| --------------------:| ---------------:| ---------:|
-| c3.2xlarge        |       8 | (min=1423, max=1518) |           11765 |       40% |
+See [here](https://github.com/minio/dsync#performance) for the collective results.
 
 Tweaking
 --------
