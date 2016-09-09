@@ -9,6 +9,7 @@ import (
 	"net/rpc"
 	"strconv"
 	"sync"
+	"time"
 )
 
 func startRPCServer(port int) {
@@ -16,10 +17,17 @@ func startRPCServer(port int) {
 	log.SetFlags(log.Lmicroseconds)
 
 	server := rpc.NewServer()
-	server.RegisterName("Dsync", &Locker{
-		mu:    sync.Mutex{},
-		nsMap: make(map[string][]bool),
-	})
+	locker := &lockServer{
+		mutex:   sync.Mutex{},
+		lockMap: make(map[string]int64),
+	}
+	go func() {
+		for {
+			time.Sleep(2 * time.Second)
+			locker.check()
+		}
+	}()
+	server.RegisterName("Dsync", locker)
 	// For some reason the registration paths need to be different (even for different server objs)
 	rpcPath := dsync.RpcPath + "-" + strconv.Itoa(port)
 	server.HandleHTTP(rpcPath, fmt.Sprintf("%s-debug", rpcPath))

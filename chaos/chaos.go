@@ -15,7 +15,7 @@ import (
 
 var (
 	portFlag = flag.Int("p", 0, "Port for server to listen on")
-	rpcPaths []string
+	lockFlag = flag.String("l", "", "Name of lock to acquire")
 	servers  []*exec.Cmd
 )
 
@@ -295,26 +295,27 @@ func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
 	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
 }
 
-// testClientThatHasLockCrashes verifies that multiple stale locks will prevent a new lock on same resource
-//
-// Specific deficiency: lock can no longer be acquired although resource is not locked
-func testClientThatHasLockCrashesKnownError(wg *sync.WaitGroup) {
+// testClientThatHasLockCrashes verifies that multiple stale locks will not prevent a new lock on same resource
+func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testClientThatHasLockCrashesKnownError")
+	log.Println("**STARTING** testClientThatHasLockCrashes")
 
-	// lock is acquired
-	dmCreateStaleLocks := dsync.NewDRWMutex("test-stale")
+	// last server is started with a client that acquires 'test-stale'
 
-	// acquire (read) lock
-	dmCreateStaleLocks.RLock()
-	log.Println("Acquired lock")
+	time.Sleep(3 * time.Second)
 
-	// client crashes while hanging on to the lock
-	/* dmCreateStaleLocks.RUnlock() -- should not be executed due to client crash */
-	log.Println("Client that has lock crashes; leaving stale locks at servers")
+	// crash the last server (creating stale locks at the other servers)
+	cmd := servers[len(servers) - 1]
+	servers = servers[0:len(servers) - 1]
+	killProcess(cmd)
+
+	log.Println("Client that has lock crashes; leaving stale locks at other servers")
+
+	// spin up crashed server again
+	servers = append(servers, launchTestServers(len(servers), 1)...)
 
 	dm := dsync.NewDRWMutex("test-stale")
 
@@ -329,13 +330,13 @@ func testClientThatHasLockCrashesKnownError(wg *sync.WaitGroup) {
 
 	select {
 	case <-ch:
-		log.Println("Acquired lock again -- should not happen")
+		log.Println("Acquired lock again")
 
-	case <-time.After(5 * time.Second):
-		log.Println("Timed out")
+	case <-time.After(10 * time.Second):
+		log.Println("Timed out -- should not happen")
 	}
 
-	log.Println("**PASSED WITH KNOWN ERROR** testClientThatHasLockCrashesKnownError")
+	log.Println("**PASSED** testClientThatHasLockCrashes")
 }
 
 func main() {
@@ -343,7 +344,29 @@ func main() {
 	flag.Parse()
 
 	if *portFlag != 0 {
-		// Does not return, will serve
+
+		if *lockFlag != "" {
+			go func() {
+				log.Println("lock", *lockFlag)
+
+				// Initialize net/rpc clients for dsync.
+				var clnts []dsync.RPC
+				for i := 0; i < n; i++ {
+					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
+				}
+
+				if err := dsync.SetNodesWithClients(clnts); err != nil {
+					log.Fatalf("set nodes failed with %v", err)
+				}
+
+				lock := dsync.NewDRWMutex(*lockFlag)
+				log.Println("before lock", *lockFlag)
+				lock.Lock()
+				log.Println("after lock", *lockFlag)
+			}()
+		}
+
+		// Does not return, will listen on port
 		startRPCServer(*portFlag)
 	}
 

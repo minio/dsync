@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/minio/dsync"
+	"log"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -113,4 +115,52 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 		delete(l.lockMap, args.Name) // Remove the (last) read lock
 	}
 	return nil
+}
+
+func (l *lockServer) check() {
+	var name *string
+	l.mutex.Lock()
+	if len(l.lockMap) > 0 {
+		for n := range l.lockMap {
+			name = &n
+		}
+	}
+	l.mutex.Unlock()
+	if name != nil {
+		log.Println("lock:", *name)
+
+		const portStart = 12345
+		const i = 3
+		c := newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i))
+
+		var locked bool
+		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: *name}, &locked); err != nil {
+			// fix 'connection refused'
+			// we failed to connect back to the client, this can either be due to
+			// a) server at client still down
+			// b) some network error (and server is up normally)
+			//
+			// We can ignore the error, and we will retry later to get resolve on this lock
+			log.Println("  Dsync.Lock failed:", err)
+		} else {
+			log.Println("  Dsync.Lock result:", locked)
+			if locked { // we are able to acquire the lock again
+
+				// remove lock from map
+				l.mutex.Lock()
+				delete(l.lockMap, *name) // Remove lock
+				l.mutex.Unlock()
+
+				var unlocked bool
+				// immediately release lock
+				if err := c.Call("Dsync.Unlock", &dsync.LockArgs{Name: *name}, &unlocked); err == nil {
+					// Unlock delivered, exit out
+					return
+				} else if err != nil {
+					// Unlock not delivered, too bad, do not retry. Instead rely on the
+					// maintenance for stale locks at the other end to release the lock
+				}
+			}
+		}
+	}
 }
