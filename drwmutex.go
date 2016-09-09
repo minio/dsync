@@ -54,6 +54,8 @@ type LockArgs struct {
 	Token     string
 	Timestamp time.Time
 	Name      string
+	Node	  string
+	RpcPath   string
 }
 
 func (l *LockArgs) SetToken(token string) {
@@ -151,13 +153,13 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 			// i.e. it is safe to call them from multiple concurrently running go routines.
 			var locked bool
 			if isReadLock {
-				if err := c.Call("Dsync.RLock", &LockArgs{Name: lockName}, &locked); err != nil {
+				if err := c.Call("Dsync.RLock", &LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &locked); err != nil {
 					if dsyncLog {
 						log.Println("Unable to call Dsync.RLock", err)
 					}
 				}
 			} else {
-				if err := c.Call("Dsync.Lock", &LockArgs{Name: lockName}, &locked); err != nil {
+				if err := c.Call("Dsync.Lock", &LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &locked); err != nil {
 					if dsyncLog {
 						log.Println("Unable to call Dsync.Lock", err)
 					}
@@ -339,7 +341,7 @@ func sendRelease(c RPC, name string, isReadLock bool) {
 			var unlocked bool
 
 			if isReadLock {
-				if err := c.Call("Dsync.RUnlock", &LockArgs{Name: name}, &unlocked); err == nil {
+				if err := c.Call("Dsync.RUnlock", &LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &unlocked); err == nil {
 					// RUnlock delivered, exit out
 					return
 				} else if err != nil {
@@ -352,7 +354,7 @@ func sendRelease(c RPC, name string, isReadLock bool) {
 					}
 				}
 			} else {
-				if err := c.Call("Dsync.Unlock", &LockArgs{Name: name}, &unlocked); err == nil {
+				if err := c.Call("Dsync.Unlock", &LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &unlocked); err == nil {
 					// Unlock delivered, exit out
 					return
 				} else if err != nil {

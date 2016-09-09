@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/minio/dsync"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -12,6 +13,9 @@ import (
 	"time"
 )
 
+const LockMaintenanceLoop = 1 * time.Second
+const LockCheckValidityInterval = 5 * time.Second
+
 func startRPCServer(port int) {
 	log.SetPrefix(fmt.Sprintf("[%d] ", port))
 	log.SetFlags(log.Lmicroseconds)
@@ -19,12 +23,14 @@ func startRPCServer(port int) {
 	server := rpc.NewServer()
 	locker := &lockServer{
 		mutex:   sync.Mutex{},
-		lockMap: make(map[string]int64),
+		lockMap: make(map[string][]lockRequesterInfo),
 	}
 	go func() {
+		// Start with random sleep time, so as to avoid "synchronous checks" between servers
+		time.Sleep(time.Duration(rand.Float64() * float64(LockMaintenanceLoop)))
 		for {
-			time.Sleep(2 * time.Second)
-			locker.check()
+			time.Sleep(LockMaintenanceLoop)
+			locker.lockMaintenance()
 		}
 	}()
 	server.RegisterName("Dsync", locker)

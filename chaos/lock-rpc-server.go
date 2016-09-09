@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"github.com/minio/dsync"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -29,13 +28,23 @@ import (
 // used when cached timestamp do not match with what client remembers.
 var errInvalidTimestamp = errors.New("Timestamps don't match, server may have restarted.")
 
-const WriteLock = -1
+type lockRequesterInfo struct {
+	writer        bool      // Bool whether write or read lock
+	node          string    // Network address of client claiming lock
+	rpcPath       string    // RPC path of client claiming lock
+	timestamp     time.Time // Timestamp set at the time of initialization
+	timeLastCheck time.Time // Timestamp for last check of validity of lock
+}
+
+func isWriteLock(lri []lockRequesterInfo) bool {
+	return len(lri) == 1 && lri[0].writer
+}
 
 type lockServer struct {
 	mutex sync.Mutex
-						// Map of locks, with negative value indicating (exclusive) write lock
-						// and positive values indicating number of read locks
-	lockMap   map[string]int64
+	// Map of locks, with negative value indicating (exclusive) write lock
+	// and positive values indicating number of read locks
+	lockMap   map[string][]lockRequesterInfo
 	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
 
@@ -52,8 +61,9 @@ func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	if _, *reply = l.lockMap[args.Name]; !*reply {
-		l.lockMap[args.Name] = WriteLock // No locks held on the given name, so claim write lock
+	_, *reply = l.lockMap[args.Name]
+	if !*reply { // No locks held on the given name, so claim write lock
+		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: true, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()}}
 	}
 	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
 	return nil
@@ -65,18 +75,17 @@ func (l *lockServer) Unlock(args *dsync.LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+	var lri []lockRequesterInfo
+	lri, *reply = l.lockMap[args.Name]
+	if !*reply { // No lock is held on the given name
 		return fmt.Errorf("Unlock attempted on an unlocked entity: %s", args.Name)
 	}
-	if *reply = locksHeld == WriteLock; !*reply { // Unless it is a write lock
-		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, locksHeld)
+	if *reply = isWriteLock(lri); !*reply { // Unless it is a write lock
+		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, len(lri))
 	}
 	delete(l.lockMap, args.Name) // Remove the write lock
 	return nil
 }
-
-const ReadLock = 1
 
 func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
@@ -84,13 +93,14 @@ func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply {
-		l.lockMap[args.Name] = ReadLock // No locks held on the given name, so claim (first) read lock
+	var lri []lockRequesterInfo
+	lri, *reply = l.lockMap[args.Name]
+	if !*reply { // No locks held on the given name, so claim (first) read lock
+		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()}}
 		*reply = true
 	} else {
-		if *reply = locksHeld != WriteLock; *reply { // Unless there is a write lock
-			l.lockMap[args.Name] = locksHeld + ReadLock // Grant another read lock
+		if *reply = !isWriteLock(lri); *reply { // Unless there is a write lock
+			l.lockMap[args.Name] = append(l.lockMap[args.Name], lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()})
 		}
 	}
 	return nil
@@ -102,39 +112,85 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	if err := l.verifyArgs(args); err != nil {
 		return err
 	}
-	var locksHeld int64
-	if locksHeld, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
+	var lri []lockRequesterInfo
+	if lri, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
 		return fmt.Errorf("RUnlock attempted on an unlocked entity: %s", args.Name)
 	}
-	if *reply = locksHeld != WriteLock; !*reply { // A write-lock is held, cannot release a read lock
+	if *reply = !isWriteLock(lri); !*reply { // A write-lock is held, cannot release a read lock
 		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
 	}
-	if locksHeld > ReadLock {
-		l.lockMap[args.Name] = locksHeld - ReadLock // Remove one of the read locks held
+	if len(lri) > 1 {
+		// TODO: Make sure we remove the correct one
+		// TODO: Make sure we remove the correct one
+		// TODO: Make sure we remove the correct one
+		lri = lri[1:]
+		l.lockMap[args.Name] = lri // Remove one of the read locks held
 	} else {
 		delete(l.lockMap, args.Name) // Remove the (last) read lock
 	}
 	return nil
 }
 
-func (l *lockServer) check() {
-	var name *string
-	l.mutex.Lock()
-	if len(l.lockMap) > 0 {
-		for n := range l.lockMap {
-			name = &n
+type nameLockRequesterInfoPair struct {
+	name string
+	lri  lockRequesterInfo
+}
+
+func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfoPair {
+
+	rslt := []nameLockRequesterInfoPair{}
+
+	for name, lriArray := range m {
+
+		for idx, _ := range lriArray {
+			// Check whether enough time has gone by since last check
+			if time.Since(lriArray[idx].timeLastCheck) >= LockCheckValidityInterval {
+				rslt = append(rslt, nameLockRequesterInfoPair{name: name, lri: lriArray[idx]})
+				lriArray[idx].timeLastCheck = time.Now()
+			}
 		}
 	}
-	l.mutex.Unlock()
-	if name != nil {
-		log.Println("lock:", *name)
 
-		const portStart = 12345
-		const i = 3
-		c := newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i))
+	return rslt
+}
+
+func (l *lockServer) lockMaintenance() {
+	l.mutex.Lock()
+	nlripLongLived := getLongLivedLocks(l.lockMap)
+	l.mutex.Unlock()
+
+	for _, nlrip := range nlripLongLived {
+
+		c := newClient(nlrip.lri.node, nlrip.lri.rpcPath)
 
 		var locked bool
-		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: *name}, &locked); err != nil {
+		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath()}, &locked); err == nil {
+
+			log.Println("  Dsync.Lock result:", locked)
+			if locked { // we are able to acquire the lock again
+
+				// immediately release lock
+				go func(nlrip nameLockRequesterInfoPair) {
+					var unlocked bool
+					if err := c.Call("Dsync.Unlock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath()}, &unlocked); err == nil {
+						// Unlock delivered, exit out
+
+						c.Close()
+
+						return
+					} else if err != nil {
+						// Unlock not delivered, too bad, do not retry. Instead rely on the
+						// maintenance for stale locks at the other end to release the lock
+					}
+				}(nlrip)
+
+				// remove lock from map
+				l.mutex.Lock()
+				// TODO: For read-lock, iterate over array and remove appropriate lock
+				delete(l.lockMap, nlrip.name) // Remove lock
+				l.mutex.Unlock()
+			}
+		} else {
 			// fix 'connection refused'
 			// we failed to connect back to the client, this can either be due to
 			// a) server at client still down
@@ -142,25 +198,6 @@ func (l *lockServer) check() {
 			//
 			// We can ignore the error, and we will retry later to get resolve on this lock
 			log.Println("  Dsync.Lock failed:", err)
-		} else {
-			log.Println("  Dsync.Lock result:", locked)
-			if locked { // we are able to acquire the lock again
-
-				// remove lock from map
-				l.mutex.Lock()
-				delete(l.lockMap, *name) // Remove lock
-				l.mutex.Unlock()
-
-				var unlocked bool
-				// immediately release lock
-				if err := c.Call("Dsync.Unlock", &dsync.LockArgs{Name: *name}, &unlocked); err == nil {
-					// Unlock delivered, exit out
-					return
-				} else if err != nil {
-					// Unlock not delivered, too bad, do not retry. Instead rely on the
-					// maintenance for stale locks at the other end to release the lock
-				}
-			}
 		}
 	}
 }
