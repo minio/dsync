@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/minio/dsync"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -14,11 +15,13 @@ import (
 )
 
 var (
-	portFlag = flag.Int("p", 0, "Port for server to listen on")
-	lockFlag = flag.String("l", "", "Name of lock to acquire")
+	portFlag = flag.Int("p", portStart, "Port for server to listen on")
+	writeLockFlag = flag.String("w", "", "Name of write lock to acquire")
+	readLockFlag = flag.String("r", "", "Name of read lock to acquire")
 	servers  []*exec.Cmd
 )
 
+const chaosName = "chaos"
 const n = 4
 const portStart = 12345
 
@@ -303,26 +306,31 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 	log.Println("")
 	log.Println("**STARTING** testClientThatHasLockCrashes")
 
-	// last server is started with a client that acquires 'test-stale'
+	time.Sleep(500 * time.Millisecond)
+
+	// kill last server and restart with a client that acquires 'test-stale'
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, "test-stale", true)...)
 
 	time.Sleep(3 * time.Second)
 
 	// crash the last server (creating stale locks at the other servers)
-	cmd := servers[len(servers) - 1]
-	servers = servers[0:len(servers) - 1]
-	killProcess(cmd)
+	killLastServer()
 
 	log.Println("Client that has lock crashes; leaving stale locks at other servers")
 
+	time.Sleep(10 * time.Second)
+
 	// spin up crashed server again
 	servers = append(servers, launchTestServers(len(servers), 1)...)
+	log.Println("Crashed server restarted")
 
 	dm := dsync.NewDRWMutex("test-stale")
 
 	ch := make(chan struct{})
 
 	// try to acquire lock in separate routine (will not succeed)
-	go func(){
+	go func() {
 		log.Println("Trying to get the lock again")
 		dm.Lock()
 		ch <- struct{}{}
@@ -331,8 +339,10 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 	select {
 	case <-ch:
 		log.Println("Acquired lock again")
+		dm.Unlock()
+		time.Sleep(1 * time.Second) // Allow messages to get out
 
-	case <-time.After(10 * time.Second):
+	case <-time.After(60 * time.Second):
 		log.Println("Timed out -- should not happen")
 	}
 
@@ -341,28 +351,39 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 
 func main() {
 
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	flag.Parse()
 
-	if *portFlag != 0 {
+	if *portFlag != portStart {
 
-		if *lockFlag != "" {
+		if *writeLockFlag != "" || *readLockFlag != "" {
 			go func() {
-				log.Println("lock", *lockFlag)
-
 				// Initialize net/rpc clients for dsync.
 				var clnts []dsync.RPC
 				for i := 0; i < n; i++ {
 					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
 				}
 
-				if err := dsync.SetNodesWithClients(clnts); err != nil {
+				if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 					log.Fatalf("set nodes failed with %v", err)
 				}
 
-				lock := dsync.NewDRWMutex(*lockFlag)
-				log.Println("before lock", *lockFlag)
-				lock.Lock()
-				log.Println("after lock", *lockFlag)
+				// Give servers some time to start
+				time.Sleep(100 * time.Millisecond)
+
+				if *writeLockFlag != "" {
+					lock := dsync.NewDRWMutex(*writeLockFlag)
+					lock.Lock()
+					log.Println("Acquired write lock:", *writeLockFlag, "(never to be released)")
+				}
+				if *readLockFlag != "" {
+					lock := dsync.NewDRWMutex(*readLockFlag)
+					lock.RLock()
+					log.Println("Acquired read lock:", *readLockFlag, "(never to be released)")
+				}
+
+				// We will hold on to the lock
 			}()
 		}
 
@@ -371,15 +392,19 @@ func main() {
 	}
 
 	// Make sure no child processes are still running
-	if countProcesses("chaos") {
+	if killStaleProcesses(chaosName) {
 		os.Exit(-1)
 	}
 
+	// For first client, start server and continue
+	go startRPCServer(*portFlag)
+
 	servers = []*exec.Cmd{}
 
-	log.SetPrefix(fmt.Sprintf("[chaos] "))
+	log.SetPrefix(fmt.Sprintf("[%s] ", chaosName))
 	log.SetFlags(log.Lmicroseconds)
-	servers = append(servers, launchTestServers(0, n)...)
+	servers = append(servers, &exec.Cmd{}) // Add fake process for first entry
+	servers = append(servers, launchTestServers(1, n-1)...)
 
 	// Initialize net/rpc clients for dsync.
 	var clnts []dsync.RPC
@@ -387,7 +412,8 @@ func main() {
 		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
 	}
 
-	if err := dsync.SetNodesWithClients(clnts); err != nil {
+	// This process serves as the first server
+	if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -412,11 +438,14 @@ func main() {
 	wg.Wait()
 
 	wg.Add(1)
-	testClientThatHasLockCrashesKnownError(&wg)
+	testClientThatHasLockCrashes(&wg)
 	wg.Wait()
+
+	// Kill any launched processes
+	killStaleProcesses(chaosName)
 }
 
-func countProcesses(name string) bool {
+func killStaleProcesses(name string) bool {
 
 	cmd := exec.Command("pgrep", name)
 	cmb, _ := cmd.CombinedOutput()
@@ -435,15 +464,34 @@ func launchTestServers(start, number int) []*exec.Cmd {
 	result := []*exec.Cmd{}
 
 	for p := portStart + start; p < portStart+start+number; p++ {
-		result = append(result, launchProcess(p))
+		result = append(result, launchProcess(p, "", false))
 	}
 
 	return result
 }
 
-func launchProcess(port int) *exec.Cmd {
+func launchTestServersWithLocks(start, number int, name string, writeLock bool) []*exec.Cmd {
 
-	cmd := exec.Command("./chaos", "-p", fmt.Sprintf("%d", port))
+	result := []*exec.Cmd{}
+
+	for p := portStart + start; p < portStart+start+number; p++ {
+		result = append(result, launchProcess(p, name, writeLock))
+	}
+
+	return result
+}
+
+func launchProcess(port int, name string, writeLock bool) *exec.Cmd {
+
+	var cmd *exec.Cmd
+	if name == "" {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port))
+	} else if writeLock {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port), "-w", name)
+	} else {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port), "-r", name)
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	go func(cmd *exec.Cmd) {
@@ -454,6 +502,12 @@ func launchProcess(port int) *exec.Cmd {
 	}(cmd)
 
 	return cmd
+}
+
+func killLastServer() {
+	cmd := servers[len(servers)-1]
+	servers = servers[0 : len(servers)-1]
+	killProcess(cmd)
 }
 
 func killProcess(cmd *exec.Cmd) {
