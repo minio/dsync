@@ -17,6 +17,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/minio/dsync"
@@ -32,6 +33,7 @@ type lockRequesterInfo struct {
 	writer        bool      // Bool whether write or read lock
 	node          string    // Network address of client claiming lock
 	rpcPath       string    // RPC path of client claiming lock
+	uid           string    // Uid to unique identify request of client
 	timestamp     time.Time // Timestamp set at the time of initialization
 	timeLastCheck time.Time // Timestamp for last check of validity of lock
 }
@@ -63,7 +65,7 @@ func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 	}
 	_, *reply = l.lockMap[args.Name]
 	if !*reply { // No locks held on the given name, so claim write lock
-		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: true, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()}}
+		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: true, node: args.Node, rpcPath: args.RpcPath, uid: args.Uid, timestamp: time.Now(), timeLastCheck: time.Now()}}
 	}
 	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
 	return nil
@@ -83,8 +85,10 @@ func (l *lockServer) Unlock(args *dsync.LockArgs, reply *bool) error {
 	if *reply = isWriteLock(lri); !*reply { // Unless it is a write lock
 		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, len(lri))
 	}
-	delete(l.lockMap, args.Name) // Remove the write lock
-	return nil
+	if l.removeEntry(args.Name, args.Uid, &lri) {
+		return nil
+	}
+	return fmt.Errorf("Unlock unable to find corresponding lock for uuid: %s", args.Uid)
 }
 
 func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
@@ -96,11 +100,11 @@ func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	var lri []lockRequesterInfo
 	lri, *reply = l.lockMap[args.Name]
 	if !*reply { // No locks held on the given name, so claim (first) read lock
-		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()}}
+		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, uid: args.Uid, timestamp: time.Now(), timeLastCheck: time.Now()}}
 		*reply = true
 	} else {
 		if *reply = !isWriteLock(lri); *reply { // Unless there is a write lock
-			l.lockMap[args.Name] = append(l.lockMap[args.Name], lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, timestamp: time.Now(), timeLastCheck: time.Now()})
+			l.lockMap[args.Name] = append(l.lockMap[args.Name], lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RpcPath, uid: args.Uid, timestamp: time.Now(), timeLastCheck: time.Now()})
 		}
 	}
 	return nil
@@ -119,16 +123,29 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	if *reply = !isWriteLock(lri); !*reply { // A write-lock is held, cannot release a read lock
 		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
 	}
-	if len(lri) > 1 {
-		// TODO: Make sure we remove the correct one
-		// TODO: Make sure we remove the correct one
-		// TODO: Make sure we remove the correct one
-		lri = lri[1:]
-		l.lockMap[args.Name] = lri // Remove one of the read locks held
-	} else {
-		delete(l.lockMap, args.Name) // Remove the (last) read lock
+	if l.removeEntry(args.Name, args.Uid, &lri) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("RUnlock unable to find corresponding read lock for uuid: %s", args.Uid)
+}
+
+// removeEntry either, based on the uid of the lock message, removes a single entry from the
+// lockRequesterInfo array or the whole array from the map (in case of a write lock or last read lock)
+func (l *lockServer) removeEntry(name, uid string, lri *[]lockRequesterInfo) bool {
+	// Find correct entry to remove based on uid
+	for index, entry := range *lri {
+		if entry.uid == uid {
+			if len(*lri) == 1 {
+				delete(l.lockMap, name) // Remove the (last) lock
+			} else {
+				// Remove the appropriate read lock
+				*lri = append((*lri)[:index], (*lri)[index+1:]...)
+				l.lockMap[name] = *lri
+			}
+			return true
+		}
+	}
+	return false
 }
 
 type nameLockRequesterInfoPair struct {
@@ -136,6 +153,8 @@ type nameLockRequesterInfoPair struct {
 	lri  lockRequesterInfo
 }
 
+// getLongLivedLocks returns locks that are older than a certain time and
+// have not been 'checked' for validity too soon enough
 func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfoPair {
 
 	rslt := []nameLockRequesterInfoPair{}
@@ -154,8 +173,12 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfo
 	return rslt
 }
 
+// lockMaintenance loops over locks that have been active for some time and checks back
+// with the original server whether it is still alive or not
 func (l *lockServer) lockMaintenance() {
+
 	l.mutex.Lock()
+	// get list of locks to check
 	nlripLongLived := getLongLivedLocks(l.lockMap)
 	l.mutex.Unlock()
 
@@ -164,40 +187,57 @@ func (l *lockServer) lockMaintenance() {
 		c := newClient(nlrip.lri.node, nlrip.lri.rpcPath)
 
 		var locked bool
-		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath()}, &locked); err == nil {
+		bytesUid := [16]byte{}
+		rand.Read(bytesUid[:])
+		uid := fmt.Sprintf("%X", bytesUid[:])
+
+		// Call original server and try to acquire a (shortlived) 'test' lock using the same name
+		// If we are able to get the (exclusive write) lock we know that our lock (whether it was a write or read lock)
+		// cannot be valid anymore, and hence we can safely remove it
+		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath(), Uid: uid}, &locked); err == nil {
 
 			log.Println("  Dsync.Lock result:", locked)
-			if locked { // we are able to acquire the lock again
+			if locked { // We are able to acquire the lock again
 
-				// immediately release lock
+				// Immediately release the lock
 				go func(nlrip nameLockRequesterInfoPair) {
 					var unlocked bool
-					if err := c.Call("Dsync.Unlock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath()}, &unlocked); err == nil {
-						// Unlock delivered, exit out
 
-						c.Close()
-
-						return
-					} else if err != nil {
-						// Unlock not delivered, too bad, do not retry. Instead rely on the
-						// maintenance for stale locks at the other end to release the lock
-					}
+					// We are going to ignore whether the unlock was delivered successfully or not
+					// (because it may be either due to server or network connection down)
+					// In case we would have just created a stale lock at the other end, we'll rely on the
+					// maintenance for stale locks at the other end to eventually release the lock
+					c.Call("Dsync.Unlock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath(), Uid: uid}, &unlocked)
+					c.Close()
 				}(nlrip)
 
-				// remove lock from map
+				// Remove lock from map
 				l.mutex.Lock()
-				// TODO: For read-lock, iterate over array and remove appropriate lock
-				delete(l.lockMap, nlrip.name) // Remove lock
+				// Check if entry still in map (could have been removed altogether by 'concurrent' (R)Unlock of last entry)
+				if lri, ok := l.lockMap[nlrip.name]; ok {
+					if !l.removeEntry(nlrip.name, nlrip.lri.uid, &lri) {
+						// Remove failed, in case it is a:
+						if nlrip.lri.writer {
+							// Writer: this should never happen as the whole (mapped) entry should have been deleted
+							log.Println("Lock maintenance failed to remove entry for write lock (should never happen)", nlrip.name, nlrip.lri, lri)
+						} else {
+							// Reader: this can happen if multiple read locks were active and the one we are looking for
+							// has been released concurrently (so it is fine)
+						}
+					} else {
+						// remove went okay, all is fine
+					}
+				}
 				l.mutex.Unlock()
 			}
 		} else {
-			// fix 'connection refused'
-			// we failed to connect back to the client, this can either be due to
-			// a) server at client still down
-			// b) some network error (and server is up normally)
+			// We failed to connect back to the server that originated the lock, this can either be due to
+			// - server at client down
+			// - some network error (and server is up normally)
 			//
-			// We can ignore the error, and we will retry later to get resolve on this lock
+			// We will ignore the error, and we will retry later to get resolve on this lock
 			log.Println("  Dsync.Lock failed:", err)
+			c.Close()
 		}
 	}
 }
