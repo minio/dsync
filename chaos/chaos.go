@@ -545,6 +545,20 @@ func main() {
 	testClientThatHasLockCrashes(&wg)
 	wg.Wait()
 
+	wg.Add(1)
+	testSingleStaleLock(&wg)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn := true
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn = false
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
 	// Kill any launched processes
 	killStaleProcesses(chaosName)
 }
