@@ -159,7 +159,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
 	// kill one server which will lose one active lock
 	cmd := servers[n/2]
-	servers = servers[0:n/2]
+	servers = servers[0 : n/2]
 	killProcess(cmd)
 	log.Println("Killed one more server to lose quorum")
 
