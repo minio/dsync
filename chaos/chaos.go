@@ -316,31 +316,74 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testSingleStaleLock")
 }
 
-// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
-//
-// Specific deficiency: lock can no longer be granted although resource is not locked
-func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
+// testMultipleStaleLocks verifies that
+// (before maintenance) multiple stale locks will prevent a new lock from being granted
+// ( after maintenance) multiple stale locks not will prevent a new lock from being granted
+func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testMultipleStaleLocksKnownError")
+	log.Println(fmt.Sprintf("**STARTING** testMultipleStaleLocks(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 
-	// lock is acquired
-	dmCreateStaleLocks := dsync.NewDRWMutex("test")
+	time.Sleep(500 * time.Millisecond)
 
-	// acquire lock
-	dmCreateStaleLocks.Lock()
-	log.Println("Acquired lock")
+	lockName := fmt.Sprintf("multiple-stale-locks-%v", time.Now())
+	fmt.Println(lockName)
+	// kill last server and restart with a client that acquires 'multiple-stale-lock'
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, lockName, true)...)
 
-	// network connections are lost to multiple servers (enough to prevent new quorum)
-	// lock is released
-	// client that has lock dies (so unlock retries /w back-off mechanism stop)
-	// network connection is repaired to lost servers
+	time.Sleep(500 * time.Millisecond)
 
-	// client is restarted
+	// kill all but (this) server -- so we have one state lock
+	for i := len(servers) - 1; i >= n/2; i-- {
+		killLastServer()
+	}
 
-	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
+	time.Sleep(500 * time.Millisecond)
+
+	// restart all servers
+	servers = append(servers, launchTestServers(len(servers), n-len(servers))...)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// lock on same resource can not be acquired due to too many servers having a stale lock
+	dm := dsync.NewDRWMutex(lockName)
+
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func() {
+		log.Println("Trying to get the lock")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	timeOut := time.After(2 * time.Second)
+	if !beforeMaintenanceKicksIn {
+		timeOut = time.After(60 * time.Second)
+	}
+
+	select {
+	case <-ch:
+		if beforeMaintenanceKicksIn {
+			log.Fatalln("Acquired lock -- SHOULD NOT HAPPEN")
+		} else {
+			log.Println("Acquired lock")
+		}
+		dm.Unlock()
+		time.Sleep(250 * time.Millisecond) // Allow messages to get out
+
+	case <-timeOut:
+		if beforeMaintenanceKicksIn {
+			log.Println("Timed out (expected)")
+		} else {
+			log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+		}
+	}
+
+	log.Println(fmt.Sprintf("**PASSED** testMultipleStaleLocks(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 }
 
 // testClientThatHasLockCrashes verifies that multiple stale locks will not prevent a new lock on same resource
