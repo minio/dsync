@@ -29,6 +29,12 @@ import (
 	"time"
 )
 
+// For this test framework we have short lock timings
+// Production should use eg following values
+//
+// const LockMaintenanceLoop       = 1 * time.Minute
+// const LockCheckValidityInterval = 2 * time.Minute
+//
 const LockMaintenanceLoop = 1 * time.Second
 const LockCheckValidityInterval = 5 * time.Second
 
@@ -46,7 +52,7 @@ func startRPCServer(port int) {
 		time.Sleep(time.Duration(rand.Float64() * float64(LockMaintenanceLoop)))
 		for {
 			time.Sleep(LockMaintenanceLoop)
-			locker.lockMaintenance()
+			locker.lockMaintenance(LockCheckValidityInterval)
 		}
 	}()
 	server.RegisterName("Dsync", locker)

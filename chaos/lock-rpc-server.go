@@ -155,7 +155,7 @@ type nameLockRequesterInfoPair struct {
 
 // getLongLivedLocks returns locks that are older than a certain time and
 // have not been 'checked' for validity too soon enough
-func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfoPair {
+func getLongLivedLocks(m map[string][]lockRequesterInfo, interval time.Duration) []nameLockRequesterInfoPair {
 
 	rslt := []nameLockRequesterInfoPair{}
 
@@ -163,7 +163,7 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfo
 
 		for idx, _ := range lriArray {
 			// Check whether enough time has gone by since last check
-			if time.Since(lriArray[idx].timeLastCheck) >= LockCheckValidityInterval {
+			if time.Since(lriArray[idx].timeLastCheck) >= interval {
 				rslt = append(rslt, nameLockRequesterInfoPair{name: name, lri: lriArray[idx]})
 				lriArray[idx].timeLastCheck = time.Now()
 			}
@@ -175,11 +175,11 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo) []nameLockRequesterInfo
 
 // lockMaintenance loops over locks that have been active for some time and checks back
 // with the original server whether it is still alive or not
-func (l *lockServer) lockMaintenance() {
+func (l *lockServer) lockMaintenance(interval time.Duration) {
 
 	l.mutex.Lock()
 	// get list of locks to check
-	nlripLongLived := getLongLivedLocks(l.lockMap)
+	nlripLongLived := getLongLivedLocks(l.lockMap, interval)
 	l.mutex.Unlock()
 
 	for _, nlrip := range nlripLongLived {
