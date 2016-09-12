@@ -77,7 +77,8 @@ func TestMain(m *testing.M) {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
 
-	if err := SetNodesWithClients(clnts); err != nil {
+	rpcOwnNodeFakeForTest := 0
+	if err := SetNodesWithClients(clnts, rpcOwnNodeFakeForTest); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 	startRPCServers(nodes)
