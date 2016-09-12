@@ -386,7 +386,8 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 	log.Println(fmt.Sprintf("**PASSED** testMultipleStaleLocks(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 }
 
-// testClientThatHasLockCrashes verifies that multiple stale locks will not prevent a new lock on same resource
+// testClientThatHasLockCrashes verifies that (after a lock maintenance loop)
+// multiple stale locks will not prevent a new lock on same resource
 func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 
 	defer wg.Done()
@@ -396,7 +397,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// kill last server and restart with a client that acquires 'test-stale'
+	// kill last server and restart with a client that acquires 'test-stale' lock
 	killLastServer()
 	servers = append(servers, launchTestServersWithLocks(len(servers), 1, "test-stale", true)...)
 
@@ -431,7 +432,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 		time.Sleep(1 * time.Second) // Allow messages to get out
 
 	case <-time.After(60 * time.Second):
-		log.Println("Timed out -- should not happen")
+		log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
 	}
 
 	log.Println("**PASSED** testClientThatHasLockCrashes")
