@@ -365,6 +365,22 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testClientThatHasLockCrashes")
 }
 
+func getSelfNode(rpcClnts []dsync.RPC, port int) int {
+
+	index := -1
+	for i, c := range rpcClnts {
+		p, _ := strconv.Atoi(strings.Split(c.Node(), ":")[1])
+		if port == p {
+			if index == -1 {
+				index = i
+			} else {
+				panic("More than one port found")
+			}
+		}
+	}
+	return index
+}
+
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
