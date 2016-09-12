@@ -17,6 +17,8 @@
 package dsync
 
 import (
+	cryptorand "crypto/rand"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -40,22 +42,31 @@ const DRWMutexAcquireTimeout = 25 * time.Millisecond // 25ms.
 // A DRWMutex is a distributed mutual exclusion lock.
 type DRWMutex struct {
 	Name         string
-	writeLocks   []bool     // Array of nodes that granted a write lock
-	readersLocks [][]bool   // Array of array of nodes that granted reader locks
+	writeLocks   []string   // Array of nodes that granted a write lock
+	readersLocks [][]string // Array of array of nodes that granted reader locks
 	m            sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 }
 
 type Granted struct {
-	index  int
-	locked bool
+	index   int
+	lockUid string // Locked if set with UID string, unlocked if empty
+}
+
+func (g *Granted) isLocked() bool {
+	return isLocked(g.lockUid)
+}
+
+func isLocked(uid string) bool {
+	return len(uid) > 0
 }
 
 type LockArgs struct {
 	Token     string
 	Timestamp time.Time
 	Name      string
-	Node	  string
+	Node      string
 	RpcPath   string
+	Uid       string
 }
 
 func (l *LockArgs) SetToken(token string) {
@@ -69,7 +80,7 @@ func (l *LockArgs) SetTimestamp(tstamp time.Time) {
 func NewDRWMutex(name string) *DRWMutex {
 	return &DRWMutex{
 		Name:       name,
-		writeLocks: make([]bool, dnodeCount),
+		writeLocks: make([]string, dnodeCount),
 	}
 }
 
@@ -103,7 +114,7 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 	for {
 		// create temp array on stack
-		locks := make([]bool, dnodeCount)
+		locks := make([]string, dnodeCount)
 
 		// try to acquire the lock
 		success := lock(clnts, &locks, dm.Name, isReadLock)
@@ -113,7 +124,7 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 				dm.m.Lock()
 				defer dm.m.Unlock()
 				// append new array of bools at the end
-				dm.readersLocks = append(dm.readersLocks, make([]bool, dnodeCount))
+				dm.readersLocks = append(dm.readersLocks, make([]string, dnodeCount))
 				// and copy stack array into last spot
 				copy(dm.readersLocks[len(dm.readersLocks)-1], locks[:])
 			} else {
@@ -140,7 +151,7 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
+func lock(clnts []RPC, locks *[]string, lockName string, isReadLock bool) bool {
 
 	// Create buffered channel of quorum size
 	ch := make(chan Granted, dnodeCount)
@@ -152,21 +163,29 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
 			var locked bool
+			bytesUid := [16]byte{}
+			cryptorand.Read(bytesUid[:])
+			uid := fmt.Sprintf("%X", bytesUid[:])
+			args := LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath(), Uid: uid}
 			if isReadLock {
-				if err := c.Call("Dsync.RLock", &LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &locked); err != nil {
+				if err := c.Call("Dsync.RLock", &args, &locked); err != nil {
 					if dsyncLog {
 						log.Println("Unable to call Dsync.RLock", err)
 					}
 				}
 			} else {
-				if err := c.Call("Dsync.Lock", &LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &locked); err != nil {
+				if err := c.Call("Dsync.Lock", &args, &locked); err != nil {
 					if dsyncLog {
 						log.Println("Unable to call Dsync.Lock", err)
 					}
 				}
 			}
 
-			ch <- Granted{index: index, locked: locked}
+			g := Granted{index: index}
+			if locked {
+				g.lockUid = args.Uid
+			}
+			ch <- g
 
 		}(index, isReadLock, c)
 	}
@@ -186,9 +205,9 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 
 			select {
 			case grant := <-ch:
-				if grant.locked {
+				if grant.isLocked() {
 					// Mark that this node has acquired the lock
-					(*locks)[grant.index] = true
+					(*locks)[grant.index] = grant.lockUid
 				} else {
 					locksFailed++
 					if locksFailed > dnodeCount-dquorum {
@@ -224,9 +243,9 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 		//  already has been unlocked again by the original calling thread)
 		for ; i < dnodeCount; i++ {
 			grantToBeReleased := <-ch
-			if grantToBeReleased.locked {
+			if grantToBeReleased.isLocked() {
 				// release lock
-				sendRelease(clnts[grantToBeReleased.index], lockName, isReadLock)
+				sendRelease(clnts[grantToBeReleased.index], lockName, grantToBeReleased.lockUid, isReadLock)
 			}
 		}
 	}(isReadLock)
@@ -237,11 +256,11 @@ func lock(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) bool {
 }
 
 // quorumMet determines whether we have acquired n/2+1 underlying locks or not
-func quorumMet(locks *[]bool) bool {
+func quorumMet(locks *[]string) bool {
 
 	count := 0
-	for _, locked := range *locks {
-		if locked {
+	for _, uid := range *locks {
+		if isLocked(uid) {
 			count++
 		}
 	}
@@ -250,11 +269,11 @@ func quorumMet(locks *[]bool) bool {
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(clnts []RPC, locks *[]bool, lockName string, isReadLock bool) {
+func releaseAll(clnts []RPC, locks *[]string, lockName string, isReadLock bool) {
 	for lock := 0; lock < dnodeCount; lock++ {
-		if (*locks)[lock] {
-			sendRelease(clnts[lock], lockName, isReadLock)
-			(*locks)[lock] = false
+		if isLocked((*locks)[lock]) {
+			sendRelease(clnts[lock], lockName, (*locks)[lock], isReadLock)
+			(*locks)[lock] = ""
 		}
 	}
 }
@@ -266,8 +285,8 @@ func (dm *DRWMutex) Unlock() {
 
 	// Check if minimally a single bool is set in the writeLocks array
 	lockFound := false
-	for _, b := range dm.writeLocks {
-		if b {
+	for _, uid := range dm.writeLocks {
+		if isLocked(uid) {
 			lockFound = true
 			break
 		}
@@ -286,7 +305,7 @@ func (dm *DRWMutex) Unlock() {
 func (dm *DRWMutex) RUnlock() {
 
 	// create temp array on stack
-	locks := make([]bool, dnodeCount)
+	locks := make([]string, dnodeCount)
 
 	{
 		dm.m.Lock()
@@ -304,24 +323,24 @@ func (dm *DRWMutex) RUnlock() {
 	unlock(&locks, dm.Name, isReadLock)
 }
 
-func unlock(locks *[]bool, name string, isReadLock bool) {
+func unlock(locks *[]string, name string, isReadLock bool) {
 
 	// We don't need to synchronously wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get quorum)
 
 	for index, c := range clnts {
 
-		if (*locks)[index] {
+		if isLocked((*locks)[index]) {
 			// broadcast lock release to all nodes the granted the lock
-			sendRelease(c, name, isReadLock)
+			sendRelease(c, name, (*locks)[index], isReadLock)
 
-			(*locks)[index] = false
+			(*locks)[index] = ""
 		}
 	}
 }
 
 // sendRelease sends a release message to a node that previously granted a lock
-func sendRelease(c RPC, name string, isReadLock bool) {
+func sendRelease(c RPC, name, uid string, isReadLock bool) {
 
 	backOffArray := []time.Duration{
 		30 * time.Second, // 30secs.
@@ -339,9 +358,9 @@ func sendRelease(c RPC, name string, isReadLock bool) {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running goroutines.
 			var unlocked bool
-
+			args := LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath(), Uid: uid}
 			if isReadLock {
-				if err := c.Call("Dsync.RUnlock", &LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &unlocked); err == nil {
+				if err := c.Call("Dsync.RUnlock", &args, &unlocked); err == nil {
 					// RUnlock delivered, exit out
 					return
 				} else if err != nil {
@@ -354,7 +373,7 @@ func sendRelease(c RPC, name string, isReadLock bool) {
 					}
 				}
 			} else {
-				if err := c.Call("Dsync.Unlock", &LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath()}, &unlocked); err == nil {
+				if err := c.Call("Dsync.Unlock", &args, &unlocked); err == nil {
 					// Unlock delivered, exit out
 					return
 				} else if err != nil {
