@@ -252,6 +252,13 @@ func lock(clnts []RPC, locks *[]string, lockName string, isReadLock bool) bool {
 
 	wg.Wait()
 
+	// Verify that localhost server is actively participating in the lock (the lock maintenance relies on this fact)
+	if quorum && !isLocked((*locks)[ownNode]) {
+		// If not, release lock (and try again later)
+		releaseAll(clnts, locks, lockName, isReadLock)
+		quorum = false
+	}
+
 	return quorum
 }
 
