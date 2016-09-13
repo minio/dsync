@@ -264,18 +264,20 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 }
 
 // testSingleStaleLock verifies that, despite a single stale lock, a new lock can still be acquired on same resource
-func testSingleStaleLock(wg *sync.WaitGroup) {
+func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testSingleStaleLock")
+	log.Println(fmt.Sprintf("**STARTING** testSingleStaleLock(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 
 	time.Sleep(500 * time.Millisecond)
 
+	lockName := fmt.Sprintf("single-stale-locks-%v", time.Now())
+
 	// kill last server and restart with a client that acquires 'test-stale'
 	killLastServer()
-	servers = append(servers, launchTestServersWithLocks(len(servers), 1, "single-stale-lock", true)...)
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, lockName, true)...)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -292,7 +294,7 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can be acquired despite single server having a stale lock
-	dm := dsync.NewDRWMutex("single-stale-lock")
+	dm := dsync.NewDRWMutex(lockName)
 
 	ch := make(chan struct{})
 
@@ -303,17 +305,30 @@ func testSingleStaleLock(wg *sync.WaitGroup) {
 		ch <- struct{}{}
 	}()
 
+	timeOut := time.After(2 * time.Second)
+	if !beforeMaintenanceKicksIn {
+		timeOut = time.After(60 * time.Second)
+	}
+
 	select {
 	case <-ch:
-		log.Println("Acquired lock")
+		if beforeMaintenanceKicksIn {
+			log.Fatalln("Acquired lock -- SHOULD NOT HAPPEN")
+		} else {
+			log.Println("Acquired lock")
+		}
 		dm.Unlock()
 		time.Sleep(250 * time.Millisecond) // Allow messages to get out
 
-	case <-time.After(2 * time.Second):
-		log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+	case <-timeOut:
+		if beforeMaintenanceKicksIn {
+			log.Println("Timed out (expected)")
+		} else {
+			log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+		}
 	}
 
-	log.Println("**PASSED** testSingleStaleLock")
+	log.Println(fmt.Sprintf("**PASSED** testSingleStaleLock(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 }
 
 // testMultipleStaleLocks verifies that
@@ -329,7 +344,6 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 	time.Sleep(500 * time.Millisecond)
 
 	lockName := fmt.Sprintf("multiple-stale-locks-%v", time.Now())
-	fmt.Println(lockName)
 	// kill last server and restart with a client that acquires 'multiple-stale-lock'
 	killLastServer()
 	servers = append(servers, launchTestServersWithLocks(len(servers), 1, lockName, true)...)
@@ -605,11 +619,17 @@ func main() {
 	wg.Wait()
 
 	wg.Add(1)
-	testSingleStaleLock(&wg)
+	beforeMaintenanceKicksIn := true
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
 	wg.Wait()
 
 	wg.Add(1)
-	beforeMaintenanceKicksIn := true
+	beforeMaintenanceKicksIn = false
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn = true
 	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
 	wg.Wait()
 
