@@ -358,7 +358,7 @@ func sendRelease(c RPC, name, uid string, isReadLock bool) {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running goroutines.
 			var unlocked bool
-			args := LockArgs{Name: name, Node: clnts[ownNode].Node(), RpcPath: clnts[ownNode].RpcPath(), Uid: uid}
+			args := LockArgs{Name: name, Uid: uid} // Just send name & uid (and leave out node and rpcPath; unimportant for unlocks)
 			if isReadLock {
 				if err := c.Call("Dsync.RUnlock", &args, &unlocked); err == nil {
 					// RUnlock delivered, exit out
