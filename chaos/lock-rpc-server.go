@@ -129,6 +129,25 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	return fmt.Errorf("RUnlock unable to find corresponding read lock for uuid: %s", args.Uid)
 }
 
+func (l* lockServer) Active(args *dsync.LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.verifyArgs(args); err != nil {
+		return err
+	}
+	var lri []lockRequesterInfo
+	if lri, *reply = l.lockMap[args.Name]; !*reply {
+		return nil // No lock is held on the given name so return false
+	}
+	// Check whether uid is still active
+	for _, entry := range lri {
+		if *reply = entry.uid == args.Uid; *reply {
+			return nil // When uid found return true
+		}
+	}
+	return nil // None found so return false
+}
+
 // removeEntry either, based on the uid of the lock message, removes a single entry from the
 // lockRequesterInfo array or the whole array from the map (in case of a write lock or last read lock)
 func (l *lockServer) removeEntry(name, uid string, lri *[]lockRequesterInfo) bool {
