@@ -17,7 +17,6 @@
 package main
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/minio/dsync"
@@ -205,34 +204,25 @@ func (l *lockServer) lockMaintenance(interval time.Duration) {
 
 		c := newClient(nlrip.lri.node, nlrip.lri.rpcPath)
 
-		var locked bool
-		bytesUid := [16]byte{}
-		rand.Read(bytesUid[:])
-		uid := fmt.Sprintf("%X", bytesUid[:])
+		var active bool
 
-		// Call original server and try to acquire a (shortlived) 'test' lock using the same name
-		// If we are able to get the (exclusive write) lock we know that our lock (whether it was a write or read lock)
-		// cannot be valid anymore, and hence we can safely remove it
-		if err := c.Call("Dsync.Lock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath(), Uid: uid}, &locked); err == nil {
+		// Call back to original server verify whether the lock is still active (based on name & uid)
+		if err := c.Call("Dsync.Active", &dsync.LockArgs{Name: nlrip.name, Uid: nlrip.lri.uid}, &active); err != nil {
+			// We failed to connect back to the server that originated the lock, this can either be due to
+			// - server at client down
+			// - some network error (and server is up normally)
+			//
+			// We will ignore the error, and we will retry later to get resolve on this lock
+			log.Println("  Dsync.Active failed:", err)
+			c.Close()
+		} else {
+			c.Close()
+			log.Println("  Dsync.Active result:", active)
 
-			log.Println("  Dsync.Lock result:", locked)
-			if locked { // We are able to acquire the lock again
-
-				// Immediately release the lock
-				go func(nlrip nameLockRequesterInfoPair) {
-					var unlocked bool
-
-					// We are going to ignore whether the unlock was delivered successfully or not
-					// (because it may be either due to server or network connection down)
-					// In case we would have just created a stale lock at the other end, we'll rely on the
-					// maintenance for stale locks at the other end to eventually release the lock
-					c.Call("Dsync.Unlock", &dsync.LockArgs{Name: nlrip.name, Node: c.Node(), RpcPath: c.RpcPath(), Uid: uid}, &unlocked)
-					c.Close()
-				}(nlrip)
-
-				// Remove lock from map
+			if !active { // The lock is no longer active at server that originated the lock
+				// so remove the lock from the map
 				l.mutex.Lock()
-				// Check if entry still in map (could have been removed altogether by 'concurrent' (R)Unlock of last entry)
+				// Check if entry is still in map (could have been removed altogether by 'concurrent' (R)Unlock of last entry)
 				if lri, ok := l.lockMap[nlrip.name]; ok {
 					if !l.removeEntry(nlrip.name, nlrip.lri.uid, &lri) {
 						// Remove failed, in case it is a:
@@ -249,14 +239,6 @@ func (l *lockServer) lockMaintenance(interval time.Duration) {
 				}
 				l.mutex.Unlock()
 			}
-		} else {
-			// We failed to connect back to the server that originated the lock, this can either be due to
-			// - server at client down
-			// - some network error (and server is up normally)
-			//
-			// We will ignore the error, and we will retry later to get resolve on this lock
-			log.Println("  Dsync.Lock failed:", err)
-			c.Close()
 		}
 	}
 }
