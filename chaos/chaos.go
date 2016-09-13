@@ -438,6 +438,60 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testClientThatHasLockCrashes")
 }
 
+// Same as testClientThatHasLockCrashes but with two clients having read locks
+func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testTwoClientsThatHaveReadLocksCrash")
+
+	time.Sleep(500 * time.Millisecond)
+
+	// kill two servers and restart with a client that acquires a read lock on 'test-stale'
+	killLastServer()
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 2, "test-stale", false)...)
+
+	time.Sleep(3 * time.Second)
+
+	// crash last two servers (creating stale locks at the other servers)
+	killLastServer()
+	killLastServer()
+
+	log.Println("Two clients with read locks crashed; leaving stale locks at other servers")
+
+	time.Sleep(10 * time.Second)
+
+	// spin up crashed servers again
+	servers = append(servers, launchTestServers(len(servers), 2)...)
+	log.Println("Crashed servers restarted")
+
+	dm := dsync.NewDRWMutex("test-stale")
+
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func() {
+		log.Println("Trying to get the lock again")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		log.Println("Acquired lock again")
+		dm.Unlock()
+		time.Sleep(1 * time.Second) // Allow messages to get out
+
+	case <-time.After(60 * time.Second):
+		log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+	}
+
+	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
+
+}
+
 func getSelfNode(rpcClnts []dsync.RPC, port int) int {
 
 	index := -1
@@ -544,6 +598,10 @@ func main() {
 
 	wg.Add(1)
 	testClientThatHasLockCrashes(&wg)
+	wg.Wait()
+
+	wg.Add(1)
+	testTwoClientsThatHaveReadLocksCrash(&wg)
 	wg.Wait()
 
 	wg.Add(1)
