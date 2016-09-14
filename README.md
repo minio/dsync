@@ -184,7 +184,7 @@ Basic architecture
 ### Lock process
 
 The basic steps in the lock process are as follows:
-- boardcast lock message to all `n` nodes
+- broadcast lock message to all `n` nodes
 - collect all responses within certain time-out window
   - if quorum met (minimally `n/2 + 1` responded positively) then grant lock 
   - otherwise release all underlying locks and try again after a (semi-)random delay
