@@ -32,7 +32,7 @@ type lockRequesterInfo struct {
 	writer        bool      // Bool whether write or read lock
 	node          string    // Network address of client claiming lock
 	rpcPath       string    // RPC path of client claiming lock
-	uid           string    // Uid to unique identify request of client
+	uid           string    // Uid to uniquely identify request of client
 	timestamp     time.Time // Timestamp set at the time of initialization
 	timeLastCheck time.Time // Timestamp for last check of validity of lock
 }
