@@ -504,6 +504,39 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
 
 	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
 
+
+type DRWMutexNoWriterStarvation struct {
+	excl *dsync.DRWMutex
+	rw   *dsync.DRWMutex
+}
+
+func NewDRWMutexNoWriterStarvation(name string) *DRWMutexNoWriterStarvation {
+	return &DRWMutexNoWriterStarvation{
+		excl: dsync.NewDRWMutex(name + "-excl-no-writer-starvation"),
+		rw: dsync.NewDRWMutex(name),
+	}
+}
+
+func (d *DRWMutexNoWriterStarvation) Lock() {
+	d.excl.Lock()
+	defer d.excl.Unlock()
+
+	d.rw.Lock()
+}
+
+func (d *DRWMutexNoWriterStarvation) Unlock() {
+	d.rw.Unlock()
+}
+
+func (d *DRWMutexNoWriterStarvation) RLock() {
+	d.excl.Lock()
+	defer d.excl.Unlock()
+
+	d.rw.RLock()
+}
+
+func (d *DRWMutexNoWriterStarvation) RUnlock() {
+	d.rw.RUnlock()
 }
 
 func getSelfNode(rpcClnts []dsync.RPC, port int) int {
