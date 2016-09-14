@@ -505,6 +505,13 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
 	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
 
 
+type RWLocker interface {
+	Lock()
+	RLock()
+	Unlock()
+	RUnlock()
+}
+
 type DRWMutexNoWriterStarvation struct {
 	excl *dsync.DRWMutex
 	rw   *dsync.DRWMutex
@@ -537,6 +544,75 @@ func (d *DRWMutexNoWriterStarvation) RLock() {
 
 func (d *DRWMutexNoWriterStarvation) RUnlock() {
 	d.rw.RUnlock()
+}
+
+// testWriterStarvation tests that a separate implementation using a pair
+// of two DRWMutexes can prevent writer starvation (due to too many read locks)
+func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println(fmt.Sprintf("**STARTING** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+
+	start := time.Now()
+
+	var m RWLocker
+	if noWriterStarvation {
+		m = NewDRWMutexNoWriterStarvation("test") // sync.RWMutex{} behaves identical
+	} else {
+		m = dsync.NewDRWMutex("test")
+	}
+
+	m.RLock()
+	log.Println("Acquired (1st) read lock")
+
+	wgReadLocks := sync.WaitGroup{}
+	wgReadLocks.Add(2)
+
+	go func() {
+		defer wgReadLocks.Done()
+		time.Sleep(2 * time.Second)
+		log.Println("About to release (1st) read lock")
+		m.RUnlock()
+		log.Println("Released (1st) read lock")
+	}()
+
+	go func() {
+		defer wgReadLocks.Done()
+		time.Sleep(10 * time.Millisecond)
+		log.Println("About to acquire (second) read lock")
+		m.RLock()
+		log.Println("Acquired (2nd) read lock")
+		time.Sleep(2 * time.Second)
+		m.RUnlock()
+		log.Println("Released (2nd) read lock")
+	}()
+
+	log.Println("About to acquire write lock")
+	m.Lock()
+	log.Println("Acquired write lock")
+	time.Sleep(2 * time.Second)
+	m.Unlock()
+	log.Println("Released write lock")
+
+	wgReadLocks.Wait()
+
+	noStarvation := time.Since(start) > 5 * time.Second
+
+	if noWriterStarvation {
+		if noStarvation {
+			log.Println(fmt.Sprintf("**PASSED** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+		} else {
+			log.Fatalln("Second read lock got preference over write lock -- SHOULD NOT HAPPEN")
+		}
+	} else {
+		if !noStarvation {
+			log.Println(fmt.Sprintf("**PASSED** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+		} else {
+			log.Fatalln("Second read lock did not get preference over write lock -- NOT EXPECTED")
+		}
+	}
 }
 
 func getSelfNode(rpcClnts []dsync.RPC, port int) int {
@@ -669,6 +745,16 @@ func main() {
 	wg.Add(1)
 	beforeMaintenanceKicksIn = false
 	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	noWriterStarvation := true
+	testWriterStarvation(&wg, noWriterStarvation)
+	wg.Wait()
+
+	wg.Add(1)
+	noWriterStarvation = false
+	testWriterStarvation(&wg, noWriterStarvation)
 	wg.Wait()
 
 	// Kill any launched processes
