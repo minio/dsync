@@ -200,11 +200,11 @@ The unlock process is really simple:
 Dealing with Stale Locks
 ------------------------
 
-A 'stale' lock would be a lock that is left at a node while the client that originally acquired the client either:
+A 'stale' lock is a lock that is left at a node while the client that originally acquired the client either:
 - never released the lock (due to eg a crash) or
 - is disconnected from the network and henceforth not able to deliver the unlock message.
 
-Too many stale locks can prevent a new lock on a resource from being acquired, that is, if the sum of the stale locks and the number of down nodes is greater than `n/2 - 1`. In `dsync` a recovery mechanism is implemented to ultimately clear stale locks. 
+Too many stale locks can prevent a new lock on a resource from being acquired, that is, if the sum of the stale locks and the number of down nodes is greater than `n/2 - 1`. In `dsync` a recovery mechanism is implemented to remove stale locks (see [here](https://github.com/minio/dsync/pull/22#issue-176751755) for the details).
 
 Known deficiencies
 ------------------
