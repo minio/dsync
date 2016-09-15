@@ -119,10 +119,11 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 		// try to acquire the lock
 		success := lock(clnts, &locks, dm.Name, isReadLock)
 		if success {
+			dm.m.Lock()
+			defer dm.m.Unlock()
+
 			// if success, copy array to object
 			if isReadLock {
-				dm.m.Lock()
-				defer dm.m.Unlock()
 				// append new array of bools at the end
 				dm.readersLocks = append(dm.readersLocks, make([]string, dnodeCount))
 				// and copy stack array into last spot
@@ -290,20 +291,31 @@ func releaseAll(clnts []RPC, locks *[]string, lockName string, isReadLock bool) 
 // It is a run-time error if dm is not locked on entry to Unlock.
 func (dm *DRWMutex) Unlock() {
 
-	// Check if minimally a single bool is set in the writeLocks array
-	lockFound := false
-	for _, uid := range dm.writeLocks {
-		if isLocked(uid) {
-			lockFound = true
-			break
+	// create temp array on stack
+	locks := make([]string, dnodeCount)
+
+	{
+		dm.m.Lock()
+		defer dm.m.Unlock()
+
+		// Check if minimally a single bool is set in the writeLocks array
+		lockFound := false
+		for _, uid := range dm.writeLocks {
+			if isLocked(uid) {
+				lockFound = true
+				break
+			}
 		}
-	}
-	if !lockFound {
-		panic("Trying to Unlock() while no Lock() is active")
+		if !lockFound {
+			panic("Trying to Unlock() while no Lock() is active")
+		}
+
+		// Copy writelocks to stack array
+		copy(locks, dm.writeLocks[:])
 	}
 
 	isReadLock := false
-	unlock(&dm.writeLocks, dm.Name, isReadLock)
+	unlock(&locks, dm.Name, isReadLock)
 }
 
 // RUnlock releases a read lock held on dm.
