@@ -127,3 +127,11 @@ func (rpcClient *RPCClient) Close() error {
 	rpcClient.clearRPCClient()
 	return rpcLocalStack.Close()
 }
+
+func (rpcClient *RPCClient) Node() string {
+	return rpcClient.node
+}
+
+func (rpcClient *RPCClient) RPCPath() string {
+	return rpcClient.rpcPath
+}
