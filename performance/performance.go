@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"strings"
 
 	"github.com/minio/dsync"
 )
@@ -113,7 +114,7 @@ func main() {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
 
-	if err := dsync.SetNodesWithClients(clnts); err != nil {
+	if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -169,4 +170,20 @@ func main() {
 		fmt.Println("Waiting for test to close...")
 		time.Sleep(10000 * time.Millisecond)
 	}
+}
+
+func getSelfNode(rpcClnts []dsync.RPC, port int) int {
+
+	index := -1
+	for i, c := range rpcClnts {
+		p, _ := strconv.Atoi(strings.Split(c.Node(), ":")[1])
+		if port == p {
+			if index == -1 {
+				index = i
+			} else {
+				panic("More than one port found")
+			}
+		}
+	}
+	return index
 }

@@ -46,6 +46,7 @@ func startRPCServer(port int) {
 	locker := &lockServer{
 		mutex:   sync.Mutex{},
 		lockMap: make(map[string][]lockRequesterInfo),
+		timestamp: time.Now().UTC(),
 	}
 	go func() {
 		// Start with random sleep time, so as to avoid "synchronous checks" between servers

@@ -503,7 +503,7 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
 	}
 
 	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
-
+}
 
 type RWLocker interface {
 	Lock()

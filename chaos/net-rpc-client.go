@@ -132,6 +132,6 @@ func (rpcClient *RPCClient) Node() string {
 	return rpcClient.node
 }
 
-func (rpcClient *RPCClient) RpcPath() string {
+func (rpcClient *RPCClient) RPCPath() string {
 	return rpcClient.rpcPath
 }
