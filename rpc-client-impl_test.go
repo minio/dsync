@@ -82,6 +82,14 @@ func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
 
 }
 
+func (rpcClient *RPCClient) Node() string {
+	return rpcClient.node
+}
+
+func (rpcClient *RPCClient) RpcPath() string {
+	return rpcClient.rpcPath
+}
+
 // IsRPCError returns true if the error value is due to a network related
 // failure, false otherwise.
 func IsRPCError(err error) bool {

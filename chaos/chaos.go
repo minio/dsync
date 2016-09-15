@@ -1,3 +1,19 @@
+/*
+ * Minio Cloud Storage, (C) 2016 Minio, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package main
 
 import (
@@ -5,6 +21,7 @@ import (
 	"fmt"
 	"github.com/minio/dsync"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -14,11 +31,13 @@ import (
 )
 
 var (
-	portFlag = flag.Int("p", 0, "Port for server to listen on")
-	rpcPaths []string
+	portFlag = flag.Int("p", portStart, "Port for server to listen on")
+	writeLockFlag = flag.String("w", "", "Name of write lock to acquire")
+	readLockFlag = flag.String("r", "", "Name of read lock to acquire")
 	servers  []*exec.Cmd
 )
 
+const chaosName = "chaos"
 const n = 4
 const portStart = 12345
 
@@ -156,7 +175,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 
 	// kill one server which will lose one active lock
 	cmd := servers[n/2]
-	servers = servers[0:n/2]
+	servers = servers[0 : n/2]
 	killProcess(cmd)
 	log.Println("Killed one more server to lose quorum")
 
@@ -245,83 +264,176 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 }
 
 // testSingleStaleLock verifies that, despite a single stale lock, a new lock can still be acquired on same resource
-func testSingleStaleLock(wg *sync.WaitGroup) {
+func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testSingleStaleLock")
+	log.Println(fmt.Sprintf("**STARTING** testSingleStaleLock(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 
-	// lock is acquired
+	time.Sleep(500 * time.Millisecond)
 
-	// network connection is lost to single server
+	lockName := fmt.Sprintf("single-stale-locks-%v", time.Now())
 
-	// lock is released
+	// kill last server and restart with a client that acquires 'test-stale'
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, lockName, true)...)
 
-	// client that has lock dies (so unlock retries /w back-off mechanism stop)
+	time.Sleep(500 * time.Millisecond)
 
-	// network connection is repaired to lost server
+	// kill all but (this) server -- so we have one stale lock
+	for i := len(servers) - 1; i >= 1; i-- {
+		killLastServer()
+	}
 
-	// client is restarted
+	time.Sleep(500 * time.Millisecond)
+
+	// restart all servers
+	servers = append(servers, launchTestServers(len(servers), n-len(servers))...)
+
+	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can be acquired despite single server having a stale lock
+	dm := dsync.NewDRWMutex(lockName)
 
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func() {
+		log.Println("Trying to get the lock")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	timeOut := time.After(2 * time.Second)
+	if !beforeMaintenanceKicksIn {
+		timeOut = time.After(60 * time.Second)
+	}
+
+	select {
+	case <-ch:
+		if beforeMaintenanceKicksIn {
+			log.Fatalln("Acquired lock -- SHOULD NOT HAPPEN")
+		} else {
+			log.Println("Acquired lock")
+		}
+		dm.Unlock()
+		time.Sleep(250 * time.Millisecond) // Allow messages to get out
+
+	case <-timeOut:
+		if beforeMaintenanceKicksIn {
+			log.Println("Timed out (expected)")
+		} else {
+			log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+		}
+	}
+
+	log.Println(fmt.Sprintf("**PASSED** testSingleStaleLock(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 }
 
-// testMultipleStaleLocksKnownError verifies that multiple stale locks will prevent a new lock from being granted
-//
-// Specific deficiency: lock can no longer be granted although resource is not locked
-func testMultipleStaleLocksKnownError(wg *sync.WaitGroup) {
+// testMultipleStaleLocks verifies that
+// (before maintenance) multiple stale locks will prevent a new lock from being granted
+// ( after maintenance) multiple stale locks not will prevent a new lock from being granted
+func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testMultipleStaleLocksKnownError")
+	log.Println(fmt.Sprintf("**STARTING** testMultipleStaleLocks(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 
-	// lock is acquired
-	dmCreateStaleLocks := dsync.NewDRWMutex("test")
+	time.Sleep(500 * time.Millisecond)
 
-	// acquire lock
-	dmCreateStaleLocks.Lock()
-	log.Println("Acquired lock")
+	lockName := fmt.Sprintf("multiple-stale-locks-%v", time.Now())
+	// kill last server and restart with a client that acquires 'multiple-stale-lock'
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, lockName, true)...)
 
-	// network connections are lost to multiple servers (enough to prevent new quorum)
-	// lock is released
-	// client that has lock dies (so unlock retries /w back-off mechanism stop)
-	// network connection is repaired to lost servers
+	time.Sleep(500 * time.Millisecond)
 
-	// client is restarted
+	// kill all but (this) server -- so we have one state lock
+	for i := len(servers) - 1; i >= n/2; i-- {
+		killLastServer()
+	}
 
-	// lock on same resource will fail (block indefinitely) due to too many multiple stale locks
+	time.Sleep(500 * time.Millisecond)
+
+	// restart all servers
+	servers = append(servers, launchTestServers(len(servers), n-len(servers))...)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// lock on same resource can not be acquired due to too many servers having a stale lock
+	dm := dsync.NewDRWMutex(lockName)
+
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func() {
+		log.Println("Trying to get the lock")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	timeOut := time.After(2 * time.Second)
+	if !beforeMaintenanceKicksIn {
+		timeOut = time.After(60 * time.Second)
+	}
+
+	select {
+	case <-ch:
+		if beforeMaintenanceKicksIn {
+			log.Fatalln("Acquired lock -- SHOULD NOT HAPPEN")
+		} else {
+			log.Println("Acquired lock")
+		}
+		dm.Unlock()
+		time.Sleep(250 * time.Millisecond) // Allow messages to get out
+
+	case <-timeOut:
+		if beforeMaintenanceKicksIn {
+			log.Println("Timed out (expected)")
+		} else {
+			log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+		}
+	}
+
+	log.Println(fmt.Sprintf("**PASSED** testMultipleStaleLocks(beforeMaintenanceKicksIn: %v)", beforeMaintenanceKicksIn))
 }
 
-// testClientThatHasLockCrashes verifies that multiple stale locks will prevent a new lock on same resource
-//
-// Specific deficiency: lock can no longer be acquired although resource is not locked
-func testClientThatHasLockCrashesKnownError(wg *sync.WaitGroup) {
+// testClientThatHasLockCrashes verifies that (after a lock maintenance loop)
+// multiple stale locks will not prevent a new lock on same resource
+func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	log.Println("")
-	log.Println("**STARTING** testClientThatHasLockCrashesKnownError")
+	log.Println("**STARTING** testClientThatHasLockCrashes")
 
-	// lock is acquired
-	dmCreateStaleLocks := dsync.NewDRWMutex("test-stale")
+	time.Sleep(500 * time.Millisecond)
 
-	// acquire (read) lock
-	dmCreateStaleLocks.RLock()
-	log.Println("Acquired lock")
+	// kill last server and restart with a client that acquires 'test-stale' lock
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 1, "test-stale", true)...)
 
-	// client crashes while hanging on to the lock
-	/* dmCreateStaleLocks.RUnlock() -- should not be executed due to client crash */
-	log.Println("Client that has lock crashes; leaving stale locks at servers")
+	time.Sleep(3 * time.Second)
+
+	// crash the last server (creating stale locks at the other servers)
+	killLastServer()
+
+	log.Println("Client that has lock crashes; leaving stale locks at other servers")
+
+	time.Sleep(10 * time.Second)
+
+	// spin up crashed server again
+	servers = append(servers, launchTestServers(len(servers), 1)...)
+	log.Println("Crashed server restarted")
 
 	dm := dsync.NewDRWMutex("test-stale")
 
 	ch := make(chan struct{})
 
 	// try to acquire lock in separate routine (will not succeed)
-	go func(){
+	go func() {
 		log.Println("Trying to get the lock again")
 		dm.Lock()
 		ch <- struct{}{}
@@ -329,34 +441,252 @@ func testClientThatHasLockCrashesKnownError(wg *sync.WaitGroup) {
 
 	select {
 	case <-ch:
-		log.Println("Acquired lock again -- should not happen")
+		log.Println("Acquired lock again")
+		dm.Unlock()
+		time.Sleep(1 * time.Second) // Allow messages to get out
 
-	case <-time.After(5 * time.Second):
-		log.Println("Timed out")
+	case <-time.After(60 * time.Second):
+		log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
 	}
 
-	log.Println("**PASSED WITH KNOWN ERROR** testClientThatHasLockCrashesKnownError")
+	log.Println("**PASSED** testClientThatHasLockCrashes")
+}
+
+// Same as testClientThatHasLockCrashes but with two clients having read locks
+func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println("**STARTING** testTwoClientsThatHaveReadLocksCrash")
+
+	time.Sleep(500 * time.Millisecond)
+
+	// kill two servers and restart with a client that acquires a read lock on 'test-stale'
+	killLastServer()
+	killLastServer()
+	servers = append(servers, launchTestServersWithLocks(len(servers), 2, "test-stale", false)...)
+
+	time.Sleep(3 * time.Second)
+
+	// crash last two servers (creating stale locks at the other servers)
+	killLastServer()
+	killLastServer()
+
+	log.Println("Two clients with read locks crashed; leaving stale locks at other servers")
+
+	time.Sleep(10 * time.Second)
+
+	// spin up crashed servers again
+	servers = append(servers, launchTestServers(len(servers), 2)...)
+	log.Println("Crashed servers restarted")
+
+	dm := dsync.NewDRWMutex("test-stale")
+
+	ch := make(chan struct{})
+
+	// try to acquire lock in separate routine (will not succeed)
+	go func() {
+		log.Println("Trying to get the lock again")
+		dm.Lock()
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		log.Println("Acquired lock again")
+		dm.Unlock()
+		time.Sleep(1 * time.Second) // Allow messages to get out
+
+	case <-time.After(60 * time.Second):
+		log.Fatalln("Timed out -- SHOULD NOT HAPPEN")
+	}
+
+	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
+
+
+type RWLocker interface {
+	Lock()
+	RLock()
+	Unlock()
+	RUnlock()
+}
+
+type DRWMutexNoWriterStarvation struct {
+	excl *dsync.DRWMutex
+	rw   *dsync.DRWMutex
+}
+
+func NewDRWMutexNoWriterStarvation(name string) *DRWMutexNoWriterStarvation {
+	return &DRWMutexNoWriterStarvation{
+		excl: dsync.NewDRWMutex(name + "-excl-no-writer-starvation"),
+		rw: dsync.NewDRWMutex(name),
+	}
+}
+
+func (d *DRWMutexNoWriterStarvation) Lock() {
+	d.excl.Lock()
+	defer d.excl.Unlock()
+
+	d.rw.Lock()
+}
+
+func (d *DRWMutexNoWriterStarvation) Unlock() {
+	d.rw.Unlock()
+}
+
+func (d *DRWMutexNoWriterStarvation) RLock() {
+	d.excl.Lock()
+	defer d.excl.Unlock()
+
+	d.rw.RLock()
+}
+
+func (d *DRWMutexNoWriterStarvation) RUnlock() {
+	d.rw.RUnlock()
+}
+
+// testWriterStarvation tests that a separate implementation using a pair
+// of two DRWMutexes can prevent writer starvation (due to too many read locks)
+func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
+
+	defer wg.Done()
+
+	log.Println("")
+	log.Println(fmt.Sprintf("**STARTING** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+
+	start := time.Now()
+
+	var m RWLocker
+	if noWriterStarvation {
+		m = NewDRWMutexNoWriterStarvation("test") // sync.RWMutex{} behaves identical
+	} else {
+		m = dsync.NewDRWMutex("test")
+	}
+
+	m.RLock()
+	log.Println("Acquired (1st) read lock")
+
+	wgReadLocks := sync.WaitGroup{}
+	wgReadLocks.Add(2)
+
+	go func() {
+		defer wgReadLocks.Done()
+		time.Sleep(2 * time.Second)
+		log.Println("About to release (1st) read lock")
+		m.RUnlock()
+		log.Println("Released (1st) read lock")
+	}()
+
+	go func() {
+		defer wgReadLocks.Done()
+		time.Sleep(10 * time.Millisecond)
+		log.Println("About to acquire (second) read lock")
+		m.RLock()
+		log.Println("Acquired (2nd) read lock")
+		time.Sleep(2 * time.Second)
+		m.RUnlock()
+		log.Println("Released (2nd) read lock")
+	}()
+
+	log.Println("About to acquire write lock")
+	m.Lock()
+	log.Println("Acquired write lock")
+	time.Sleep(2 * time.Second)
+	m.Unlock()
+	log.Println("Released write lock")
+
+	wgReadLocks.Wait()
+
+	noStarvation := time.Since(start) > 5 * time.Second
+
+	if noWriterStarvation {
+		if noStarvation {
+			log.Println(fmt.Sprintf("**PASSED** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+		} else {
+			log.Fatalln("Second read lock got preference over write lock -- SHOULD NOT HAPPEN")
+		}
+	} else {
+		if !noStarvation {
+			log.Println(fmt.Sprintf("**PASSED** testWriterStarvation(noWriterStarvation: %v)", noWriterStarvation))
+		} else {
+			log.Fatalln("Second read lock did not get preference over write lock -- NOT EXPECTED")
+		}
+	}
+}
+
+func getSelfNode(rpcClnts []dsync.RPC, port int) int {
+
+	index := -1
+	for i, c := range rpcClnts {
+		p, _ := strconv.Atoi(strings.Split(c.Node(), ":")[1])
+		if port == p {
+			if index == -1 {
+				index = i
+			} else {
+				panic("More than one port found")
+			}
+		}
+	}
+	return index
 }
 
 func main() {
 
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	flag.Parse()
 
-	if *portFlag != 0 {
-		// Does not return, will serve
+	if *portFlag != portStart {
+
+		if *writeLockFlag != "" || *readLockFlag != "" {
+			go func() {
+				// Initialize net/rpc clients for dsync.
+				var clnts []dsync.RPC
+				for i := 0; i < n; i++ {
+					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
+				}
+
+				if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+					log.Fatalf("set nodes failed with %v", err)
+				}
+
+				// Give servers some time to start
+				time.Sleep(100 * time.Millisecond)
+
+				if *writeLockFlag != "" {
+					lock := dsync.NewDRWMutex(*writeLockFlag)
+					lock.Lock()
+					log.Println("Acquired write lock:", *writeLockFlag, "(never to be released)")
+				}
+				if *readLockFlag != "" {
+					lock := dsync.NewDRWMutex(*readLockFlag)
+					lock.RLock()
+					log.Println("Acquired read lock:", *readLockFlag, "(never to be released)")
+				}
+
+				// We will hold on to the lock
+			}()
+		}
+
+		// Does not return, will listen on port
 		startRPCServer(*portFlag)
 	}
 
 	// Make sure no child processes are still running
-	if countProcesses("chaos") {
+	if killStaleProcesses(chaosName) {
 		os.Exit(-1)
 	}
 
+	// For first client, start server and continue
+	go startRPCServer(*portFlag)
+
 	servers = []*exec.Cmd{}
 
-	log.SetPrefix(fmt.Sprintf("[chaos] "))
+	log.SetPrefix(fmt.Sprintf("[%s] ", chaosName))
 	log.SetFlags(log.Lmicroseconds)
-	servers = append(servers, launchTestServers(0, n)...)
+	servers = append(servers, &exec.Cmd{}) // Add fake process for first entry
+	servers = append(servers, launchTestServers(1, n-1)...)
 
 	// Initialize net/rpc clients for dsync.
 	var clnts []dsync.RPC
@@ -364,7 +694,8 @@ func main() {
 		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
 	}
 
-	if err := dsync.SetNodesWithClients(clnts); err != nil {
+	// This process serves as the first server
+	if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -389,11 +720,48 @@ func main() {
 	wg.Wait()
 
 	wg.Add(1)
-	testClientThatHasLockCrashesKnownError(&wg)
+	testClientThatHasLockCrashes(&wg)
 	wg.Wait()
+
+	wg.Add(1)
+	testTwoClientsThatHaveReadLocksCrash(&wg)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn := true
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn = false
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn = true
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	beforeMaintenanceKicksIn = false
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	wg.Wait()
+
+	wg.Add(1)
+	noWriterStarvation := true
+	testWriterStarvation(&wg, noWriterStarvation)
+	wg.Wait()
+
+	wg.Add(1)
+	noWriterStarvation = false
+	testWriterStarvation(&wg, noWriterStarvation)
+	wg.Wait()
+
+	// Kill any launched processes
+	killStaleProcesses(chaosName)
 }
 
-func countProcesses(name string) bool {
+func killStaleProcesses(name string) bool {
 
 	cmd := exec.Command("pgrep", name)
 	cmb, _ := cmd.CombinedOutput()
@@ -412,15 +780,34 @@ func launchTestServers(start, number int) []*exec.Cmd {
 	result := []*exec.Cmd{}
 
 	for p := portStart + start; p < portStart+start+number; p++ {
-		result = append(result, launchProcess(p))
+		result = append(result, launchProcess(p, "", false))
 	}
 
 	return result
 }
 
-func launchProcess(port int) *exec.Cmd {
+func launchTestServersWithLocks(start, number int, name string, writeLock bool) []*exec.Cmd {
 
-	cmd := exec.Command("./chaos", "-p", fmt.Sprintf("%d", port))
+	result := []*exec.Cmd{}
+
+	for p := portStart + start; p < portStart+start+number; p++ {
+		result = append(result, launchProcess(p, name, writeLock))
+	}
+
+	return result
+}
+
+func launchProcess(port int, name string, writeLock bool) *exec.Cmd {
+
+	var cmd *exec.Cmd
+	if name == "" {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port))
+	} else if writeLock {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port), "-w", name)
+	} else {
+		cmd = exec.Command("./"+chaosName, "-p", fmt.Sprintf("%d", port), "-r", name)
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	go func(cmd *exec.Cmd) {
@@ -431,6 +818,12 @@ func launchProcess(port int) *exec.Cmd {
 	}(cmd)
 
 	return cmd
+}
+
+func killLastServer() {
+	cmd := servers[len(servers)-1]
+	servers = servers[0 : len(servers)-1]
+	killProcess(cmd)
 }
 
 func killProcess(cmd *exec.Cmd) {
