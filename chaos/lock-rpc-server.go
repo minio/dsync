@@ -47,70 +47,88 @@ type lockServer struct {
 	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
 
-func (l *lockServer) verifyArgs(args *dsync.LockArgs) error {
+func (l *lockServer) validateLockArgs(args *dsync.LockArgs) error {
 	if !l.timestamp.Equal(args.Timestamp) {
 		return errInvalidTimestamp
 	}
 	return nil
 }
 
+// Lock - rpc handler for (single) write lock operation.
 func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
+	if err := l.validateLockArgs(args); err != nil {
 		return err
 	}
 	_, *reply = l.lockMap[args.Name]
 	if !*reply { // No locks held on the given name, so claim write lock
-		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: true, node: args.Node, rpcPath: args.RPCPath, uid: args.UID, timestamp: time.Now(), timeLastCheck: time.Now()}}
+		l.lockMap[args.Name] = []lockRequesterInfo{
+			{
+				writer:        true,
+				node:          args.Node,
+				rpcPath:       args.RPCPath,
+				uid:           args.UID,
+				timestamp:     time.Now().UTC(),
+				timeLastCheck: time.Now().UTC(),
+			},
+		}
 	}
 	*reply = !*reply // Negate *reply to return true when lock is granted or false otherwise
 	return nil
 }
 
+// Unlock - rpc handler for (single) write unlock operation.
 func (l *lockServer) Unlock(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
+	if err := l.validateLockArgs(args); err != nil {
 		return err
 	}
 	var lri []lockRequesterInfo
-	lri, *reply = l.lockMap[args.Name]
-	if !*reply { // No lock is held on the given name
+	if lri, *reply = l.lockMap[args.Name]; !*reply { // No lock is held on the given name
 		return fmt.Errorf("Unlock attempted on an unlocked entity: %s", args.Name)
 	}
 	if *reply = isWriteLock(lri); !*reply { // Unless it is a write lock
 		return fmt.Errorf("Unlock attempted on a read locked entity: %s (%d read locks active)", args.Name, len(lri))
 	}
-	if l.removeEntry(args.Name, args.UID, &lri) {
-		return nil
-	}
-	return fmt.Errorf("Unlock unable to find corresponding lock for uid: %s", args.UID)
-}
-
-func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
-		return err
-	}
-	var lri []lockRequesterInfo
-	lri, *reply = l.lockMap[args.Name]
-	if !*reply { // No locks held on the given name, so claim (first) read lock
-		l.lockMap[args.Name] = []lockRequesterInfo{lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RPCPath, uid: args.UID, timestamp: time.Now(), timeLastCheck: time.Now()}}
-		*reply = true
-	} else {
-		if *reply = !isWriteLock(lri); *reply { // Unless there is a write lock
-			l.lockMap[args.Name] = append(l.lockMap[args.Name], lockRequesterInfo{writer: false, node: args.Node, rpcPath: args.RPCPath, uid: args.UID, timestamp: time.Now(), timeLastCheck: time.Now()})
-		}
+	if !l.removeEntry(args.Name, args.UID, &lri) {
+		return fmt.Errorf("Unlock unable to find corresponding lock for uid: %s", args.UID)
 	}
 	return nil
 }
 
+// RLock - rpc handler for read lock operation.
+func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if err := l.validateLockArgs(args); err != nil {
+		return err
+	}
+	lrInfo := lockRequesterInfo{
+		writer:        false,
+		node:          args.Node,
+		rpcPath:       args.RPCPath,
+		uid:           args.UID,
+		timestamp:     time.Now().UTC(),
+		timeLastCheck: time.Now().UTC(),
+	}
+	if lri, ok := l.lockMap[args.Name]; ok {
+		if *reply = !isWriteLock(lri); *reply { // Unless there is a write lock
+			l.lockMap[args.Name] = append(l.lockMap[args.Name], lrInfo)
+		}
+	} else { // No locks held on the given name, so claim (first) read lock
+		l.lockMap[args.Name] = []lockRequesterInfo{lrInfo}
+		*reply = true
+	}
+	return nil
+}
+
+// RUnlock - rpc handler for read unlock operation.
 func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
+	if err := l.validateLockArgs(args); err != nil {
 		return err
 	}
 	var lri []lockRequesterInfo
@@ -120,10 +138,10 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	if *reply = !isWriteLock(lri); !*reply { // A write-lock is held, cannot release a read lock
 		return fmt.Errorf("RUnlock attempted on a write locked entity: %s", args.Name)
 	}
-	if l.removeEntry(args.Name, args.UID, &lri) {
-		return nil
+	if !l.removeEntry(args.Name, args.UID, &lri) {
+		return fmt.Errorf("RUnlock unable to find corresponding read lock for uid: %s", args.UID)
 	}
-	return fmt.Errorf("RUnlock unable to find corresponding read lock for uid: %s", args.UID)
+	return nil
 }
 
 func (l* lockServer) Active(args *dsync.LockArgs, reply *bool) error {
