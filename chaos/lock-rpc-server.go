@@ -144,23 +144,26 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	return nil
 }
 
-func (l* lockServer) Active(args *dsync.LockArgs, reply *bool) error {
+// Expired - rpc handler for expired lock status.
+func (l* lockServer) Expired(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if err := l.verifyArgs(args); err != nil {
+	if err := l.validateLockArgs(args); err != nil {
 		return err
 	}
-	var lri []lockRequesterInfo
-	if lri, *reply = l.lockMap[args.Name]; !*reply {
-		return nil // No lock is held on the given name so return false
-	}
-	// Check whether uid is still active
-	for _, entry := range lri {
-		if *reply = entry.uid == args.UID; *reply {
-			return nil // When uid found return true
+	if lri, ok := l.lockMap[args.Name]; ok {
+		// Check whether uid is still active for this name
+		for _, entry := range lri {
+			if entry.uid == args.UID {
+				*reply = false // When uid found, lock is still active so return not expired
+				return nil
+			}
 		}
 	}
-	return nil // None found so return false
+	// When we get here, lock is no longer active due to either args.Name being absent from map
+	// or uid not found for given args.Name
+	*reply = true
+	return nil
 }
 
 // removeEntry either, based on the uid of the lock message, removes a single entry from the
@@ -180,6 +183,21 @@ func (l *lockServer) removeEntry(name, uid string, lri *[]lockRequesterInfo) boo
 		}
 	}
 	return false
+}
+
+// Similar to removeEntry but only removes an entry only if the lock entry exists in map.
+func (l *lockServer) removeEntryIfExists(nlrip nameLockRequesterInfoPair) {
+	// Check if entry is still in map (could have been removed altogether by 'concurrent' (R)Unlock of last entry)
+	if lri, ok := l.lockMap[nlrip.name]; ok {
+		if !l.removeEntry(nlrip.name, nlrip.lri.uid, &lri) {
+			// Remove failed, in case it is a:
+			if nlrip.lri.writer {
+				// Writer: this should never happen as the whole (mapped) entry should have been deleted
+				log.Println("Lock maintenance failed to remove entry for write lock (should never happen)", nlrip.name, nlrip.lri.uid, lri)
+			} // Reader: this can happen if multiple read locks were active and
+			// the one we are looking for has been released concurrently (so it is fine)
+		} // Remove went okay, all is fine
+	}
 }
 
 type nameLockRequesterInfoPair struct {
@@ -209,52 +227,39 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo, interval time.Duration)
 
 // lockMaintenance loops over locks that have been active for some time and checks back
 // with the original server whether it is still alive or not
+//
+// Following logic inside ignores the errors generated for Dsync.Active operation.
+// - server at client down
+// - some network error (and server is up normally)
+//
+// We will ignore the error, and we will retry later to get a resolve on this lock
 func (l *lockServer) lockMaintenance(interval time.Duration) {
-
 	l.mutex.Lock()
-	// get list of locks to check
+	// Get list of long lived locks to check for staleness.
 	nlripLongLived := getLongLivedLocks(l.lockMap, interval)
 	l.mutex.Unlock()
 
+	// Validate if long lived locks are indeed clean.
 	for _, nlrip := range nlripLongLived {
-
+		// Initialize client based on the long live locks.
 		c := newClient(nlrip.lri.node, nlrip.lri.rpcPath)
 
-		var active bool
+		var expired bool
 
-		// Call back to original server verify whether the lock is still active (based on name & uid)
-		if err := c.Call("Dsync.Active", &dsync.LockArgs{Name: nlrip.name, UID: nlrip.lri.uid}, &active); err != nil {
-			// We failed to connect back to the server that originated the lock, this can either be due to
-			// - server at client down
-			// - some network error (and server is up normally)
-			//
-			// We will ignore the error, and we will retry later to get resolve on this lock
-			log.Println("  Dsync.Active failed:", err)
-			c.Close()
-		} else {
-			c.Close()
-			log.Println("  Dsync.Active result:", active)
+		// Call back to original server to verify whether the lock is still active (based on name & uid)
+		// We will ignore any errors (see above for reasons), such locks will be retried later to get resolved
+		c.Call("Dsync.Expired", &dsync.LockArgs{
+			Name: nlrip.name,
+			UID:  nlrip.lri.uid,
+		}, &expired)
+		c.Close()
 
-			if !active { // The lock is no longer active at server that originated the lock
-				// so remove the lock from the map
-				l.mutex.Lock()
-				// Check if entry is still in map (could have been removed altogether by 'concurrent' (R)Unlock of last entry)
-				if lri, ok := l.lockMap[nlrip.name]; ok {
-					if !l.removeEntry(nlrip.name, nlrip.lri.uid, &lri) {
-						// Remove failed, in case it is a:
-						if nlrip.lri.writer {
-							// Writer: this should never happen as the whole (mapped) entry should have been deleted
-							log.Println("Lock maintenance failed to remove entry for write lock (should never happen)", nlrip.name, nlrip.lri, lri)
-						} else {
-							// Reader: this can happen if multiple read locks were active and the one we are looking for
-							// has been released concurrently (so it is fine)
-						}
-					} else {
-						// remove went okay, all is fine
-					}
-				}
-				l.mutex.Unlock()
-			}
+		if expired {
+			// The lock is no longer active at server that originated the lock
+			// So remove the lock from the map.
+			l.mutex.Lock()
+			l.removeEntryIfExists(nlrip) // Purge the stale entry if it exists.
+			l.mutex.Unlock()
 		}
 	}
 }
