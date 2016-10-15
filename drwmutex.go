@@ -124,7 +124,7 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 			// if success, copy array to object
 			if isReadLock {
-				// append new array of bools at the end
+				// append new array of strings at the end
 				dm.readersLocks = append(dm.readersLocks, make([]string, dnodeCount))
 				// and copy stack array into last spot
 				copy(dm.readersLocks[len(dm.readersLocks)-1], locks[:])
@@ -315,12 +315,14 @@ func (dm *DRWMutex) Unlock() {
 			panic("Trying to Unlock() while no Lock() is active")
 		}
 
-		// Copy writelocks to stack array
+		// Copy write locks to stack array
 		copy(locks, dm.writeLocks[:])
+		// Clear write locks array
+		dm.writeLocks = make([]string, dnodeCount)
 	}
 
 	isReadLock := false
-	unlock(&locks, dm.Name, isReadLock)
+	unlock(locks, dm.Name, isReadLock)
 }
 
 // RUnlock releases a read lock held on dm.
@@ -344,21 +346,19 @@ func (dm *DRWMutex) RUnlock() {
 	}
 
 	isReadLock := true
-	unlock(&locks, dm.Name, isReadLock)
+	unlock(locks, dm.Name, isReadLock)
 }
 
-func unlock(locks *[]string, name string, isReadLock bool) {
+func unlock(locks []string, name string, isReadLock bool) {
 
 	// We don't need to synchronously wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get quorum)
 
 	for index, c := range clnts {
 
-		if isLocked((*locks)[index]) {
-			// broadcast lock release to all nodes the granted the lock
-			sendRelease(c, name, (*locks)[index], isReadLock)
-
-			(*locks)[index] = ""
+		if isLocked(locks[index]) {
+			// broadcast lock release to all nodes that granted the lock
+			sendRelease(c, name, locks[index], isReadLock)
 		}
 	}
 }
