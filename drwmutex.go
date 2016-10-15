@@ -363,6 +363,25 @@ func unlock(locks []string, name string, isReadLock bool) {
 	}
 }
 
+// ForceUnlock will forcefully clear a write or read lock.
+func (dm *DRWMutex) ForceUnlock() {
+
+	{
+		dm.m.Lock()
+		defer dm.m.Unlock()
+
+		// Clear write locks array
+		dm.writeLocks = make([]string, dnodeCount)
+		// Clear read locks array
+		dm.readersLocks = nil
+	}
+
+	for _, c := range clnts {
+		// broadcast lock release to all nodes that granted the lock
+		sendRelease(c, dm.Name, "", false)
+	}
+}
+
 // sendRelease sends a release message to a node that previously granted a lock
 func sendRelease(c RPC, name, uid string, isReadLock bool) {
 
@@ -383,7 +402,20 @@ func sendRelease(c RPC, name, uid string, isReadLock bool) {
 			// i.e. it is safe to call them from multiple concurrently running goroutines.
 			var unlocked bool
 			args := LockArgs{Name: name, UID: uid} // Just send name & uid (and leave out node and rpcPath; unimportant for unlocks)
-			if isReadLock {
+			if len(uid) == 0 {
+				if err := c.Call("Dsync.ForceUnlock", &args, &unlocked); err == nil {
+					// ForceUnlock delivered, exit out
+					return
+				} else if err != nil {
+					if dsyncLog {
+						log.Println("Unable to call Dsync.ForceUnlock", err)
+					}
+					if nErr, ok := err.(net.Error); ok && nErr.Timeout() {
+						// ForceUnlock possibly failed with server timestamp mismatch, server may have restarted.
+						return
+					}
+				}
+			} else if isReadLock {
 				if err := c.Call("Dsync.RUnlock", &args, &unlocked); err == nil {
 					// RUnlock delivered, exit out
 					return
