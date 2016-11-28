@@ -30,6 +30,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+
 	. "github.com/minio/dsync"
 )
 
