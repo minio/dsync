@@ -20,6 +20,7 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
+
 	. "github.com/minio/dsync"
 )
 

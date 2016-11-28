@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
 	. "github.com/minio/dsync"
 )
 
@@ -241,7 +242,7 @@ func TestRUnlockPanic(t *testing.T) {
 			t.Fatalf("read unlock of unlocked RWMutex did not panic")
 		}
 	}()
-	mu  := NewDRWMutex("test")
+	mu := NewDRWMutex("test")
 	mu.RUnlock()
 }
 

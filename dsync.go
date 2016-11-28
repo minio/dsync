@@ -34,6 +34,7 @@ var ownNode int
 
 // Simple majority based quorum, set to dNodeCount/2+1
 var dquorum int
+
 // Simple quorum for read operations, set to dNodeCount/2
 var dquorumReads int
 
@@ -45,8 +46,8 @@ func SetNodesWithClients(rpcClnts []RPC, rpcOwnNode int) (err error) {
 	// Validate if number of nodes is within allowable range.
 	if dnodeCount != 0 {
 		return errors.New("Cannot reinitialize dsync package")
-	} else if len(rpcClnts) < 2 {
-		return errors.New("Dsync not designed for less than 2 nodes")
+	} else if len(rpcClnts) < 4 {
+		return errors.New("Dsync not designed for less than 4 nodes")
 	} else if len(rpcClnts) > 16 {
 		return errors.New("Dsync not designed for more than 16 nodes")
 	} else if len(rpcClnts)&1 == 1 {
@@ -59,7 +60,7 @@ func SetNodesWithClients(rpcClnts []RPC, rpcOwnNode int) (err error) {
 
 	dnodeCount = len(rpcClnts)
 	dquorum = dnodeCount/2 + 1
-	dquorumReads = dnodeCount/2
+	dquorumReads = dnodeCount / 2
 	// Initialize node name and rpc path for each RPCClient object.
 	clnts = make([]RPC, dnodeCount)
 	copy(clnts, rpcClnts)

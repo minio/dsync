@@ -19,9 +19,10 @@ package dsync_test
 import (
 	"errors"
 	"fmt"
-	. "github.com/minio/dsync"
 	"sync"
 	"time"
+
+	. "github.com/minio/dsync"
 )
 
 // used when cached timestamp do not match with what client remembers.
