@@ -61,12 +61,12 @@ func isLocked(uid string) bool {
 }
 
 type LockArgs struct {
-	Token     string
-	Timestamp time.Time
-	Name      string
-	Node      string
-	RPCPath   string
-	UID       string
+	Token      string
+	Timestamp  time.Time
+	Name       string
+	ServerAddr string
+	Resource   string
+	UID        string
 }
 
 func (l *LockArgs) SetToken(token string) {
@@ -152,7 +152,7 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 // lock tries to acquire the distributed lock, returning true or false
 //
-func lock(clnts []RPC, locks *[]string, lockName string, isReadLock bool) bool {
+func lock(clnts []RPCClient, locks *[]string, lockName string, isReadLock bool) bool {
 
 	// Create buffered channel of size equal to total number of nodes.
 	ch := make(chan Granted, dnodeCount)
@@ -160,14 +160,14 @@ func lock(clnts []RPC, locks *[]string, lockName string, isReadLock bool) bool {
 	for index, c := range clnts {
 
 		// broadcast lock request to all nodes
-		go func(index int, isReadLock bool, c RPC) {
+		go func(index int, isReadLock bool, c RPCClient) {
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
 			var locked bool
 			bytesUid := [16]byte{}
 			cryptorand.Read(bytesUid[:])
 			uid := fmt.Sprintf("%X", bytesUid[:])
-			args := LockArgs{Name: lockName, Node: clnts[ownNode].Node(), RPCPath: clnts[ownNode].RPCPath(), UID: uid}
+			args := LockArgs{Name: lockName, ServerAddr: clnts[ownNode].ServerAddr(), Resource: clnts[ownNode].Resource(), UID: uid}
 			if isReadLock {
 				if err := c.Call("Dsync.RLock", &args, &locked); err != nil {
 					if dsyncLog {
@@ -284,7 +284,7 @@ func quorumMet(locks *[]string, isReadLock bool) bool {
 }
 
 // releaseAll releases all locks that are marked as locked
-func releaseAll(clnts []RPC, locks *[]string, lockName string, isReadLock bool) {
+func releaseAll(clnts []RPCClient, locks *[]string, lockName string, isReadLock bool) {
 	for lock := 0; lock < dnodeCount; lock++ {
 		if isLocked((*locks)[lock]) {
 			sendRelease(clnts[lock], lockName, (*locks)[lock], isReadLock)
@@ -385,7 +385,7 @@ func (dm *DRWMutex) ForceUnlock() {
 }
 
 // sendRelease sends a release message to a node that previously granted a lock
-func sendRelease(c RPC, name, uid string, isReadLock bool) {
+func sendRelease(c RPCClient, name, uid string, isReadLock bool) {
 
 	backOffArray := []time.Duration{
 		30 * time.Second, // 30secs.
@@ -396,7 +396,7 @@ func sendRelease(c RPC, name, uid string, isReadLock bool) {
 		1 * time.Hour,    // 1hr.
 	}
 
-	go func(c RPC, name string) {
+	go func(c RPCClient, name string) {
 
 		for _, backOff := range backOffArray {
 

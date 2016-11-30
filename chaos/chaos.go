@@ -19,7 +19,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/minio/dsync"
 	"log"
 	"math/rand"
 	"os"
@@ -28,18 +27,21 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/minio/dsync"
 )
 
 var (
-	portFlag = flag.Int("p", portStart, "Port for server to listen on")
+	portFlag      = flag.Int("p", portStart, "Port for server to listen on")
 	writeLockFlag = flag.String("w", "", "Name of write lock to acquire")
-	readLockFlag = flag.String("r", "", "Name of read lock to acquire")
-	servers  []*exec.Cmd
+	readLockFlag  = flag.String("r", "", "Name of read lock to acquire")
+	servers       []*exec.Cmd
 )
 
 const chaosName = "chaos"
 const n = 4
 const portStart = 12345
+const rpcPathPrefix = "/dsync"
 
 // testNotEnoughServersForQuorum verifies that when quorum cannot be achieved that locking will block.
 // Once another server comes up and quorum becomes possible, the lock will be granted
@@ -520,7 +522,7 @@ type DRWMutexNoWriterStarvation struct {
 func NewDRWMutexNoWriterStarvation(name string) *DRWMutexNoWriterStarvation {
 	return &DRWMutexNoWriterStarvation{
 		excl: dsync.NewDRWMutex(name + "-excl-no-writer-starvation"),
-		rw: dsync.NewDRWMutex(name),
+		rw:   dsync.NewDRWMutex(name),
 	}
 }
 
@@ -598,7 +600,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
 
 	wgReadLocks.Wait()
 
-	noStarvation := time.Since(start) > 5 * time.Second
+	noStarvation := time.Since(start) > 5*time.Second
 
 	if noWriterStarvation {
 		if noStarvation {
@@ -615,11 +617,11 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
 	}
 }
 
-func getSelfNode(rpcClnts []dsync.RPC, port int) int {
+func getSelfNode(rpcClnts []dsync.RPCClient, port int) int {
 
 	index := -1
 	for i, c := range rpcClnts {
-		p, _ := strconv.Atoi(strings.Split(c.Node(), ":")[1])
+		p, _ := strconv.Atoi(strings.Split(c.ServerAddr(), ":")[1])
 		if port == p {
 			if index == -1 {
 				index = i
@@ -642,12 +644,12 @@ func main() {
 		if *writeLockFlag != "" || *readLockFlag != "" {
 			go func() {
 				// Initialize net/rpc clients for dsync.
-				var clnts []dsync.RPC
+				var clnts []dsync.RPCClient
 				for i := 0; i < n; i++ {
-					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
+					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 				}
 
-				if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+				if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 					log.Fatalf("set nodes failed with %v", err)
 				}
 
@@ -689,13 +691,13 @@ func main() {
 	servers = append(servers, launchTestServers(1, n-1)...)
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []dsync.RPC
+	var clnts []dsync.RPCClient
 	for i := 0; i < n; i++ {
-		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), dsync.RpcPath+"-"+strconv.Itoa(portStart+i)))
+		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 	}
 
 	// This process serves as the first server
-	if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+	if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 

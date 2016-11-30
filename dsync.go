@@ -18,16 +18,11 @@ package dsync
 
 import "errors"
 
-const RpcPath = "/dsync"
-const DebugPath = "/debug"
-
-const DefaultPath = "/rpc/dsync"
-
 // Number of nodes participating in the distributed locking.
 var dnodeCount int
 
 // List of rpc client objects, one per lock server.
-var clnts []RPC
+var clnts []RPCClient
 
 // Index into rpc client array for server running on localhost
 var ownNode int
@@ -41,7 +36,7 @@ var dquorumReads int
 // SetNodesWithPath - initializes package-level global state variables such as clnts.
 // N B - This function should be called only once inside any program that uses
 // dsync.
-func SetNodesWithClients(rpcClnts []RPC, rpcOwnNode int) (err error) {
+func Init(rpcClnts []RPCClient, rpcOwnNode int) (err error) {
 
 	// Validate if number of nodes is within allowable range.
 	if dnodeCount != 0 {
@@ -62,7 +57,7 @@ func SetNodesWithClients(rpcClnts []RPC, rpcOwnNode int) (err error) {
 	dquorum = dnodeCount/2 + 1
 	dquorumReads = dnodeCount / 2
 	// Initialize node name and rpc path for each RPCClient object.
-	clnts = make([]RPC, dnodeCount)
+	clnts = make([]RPCClient, dnodeCount)
 	copy(clnts, rpcClnts)
 
 	ownNode = rpcOwnNode

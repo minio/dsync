@@ -18,7 +18,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/minio/dsync"
 	"log"
 	"math/rand"
 	"net"
@@ -58,7 +57,7 @@ func startRPCServer(port int) {
 	}()
 	server.RegisterName("Dsync", locker)
 	// For some reason the registration paths need to be different (even for different server objs)
-	rpcPath := dsync.RpcPath + "-" + strconv.Itoa(port)
+	rpcPath := rpcPathPrefix + "-" + strconv.Itoa(port)
 	server.HandleHTTP(rpcPath, fmt.Sprintf("%s-debug", rpcPath))
 	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if e != nil {

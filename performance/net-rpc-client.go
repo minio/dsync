@@ -128,10 +128,10 @@ func (rpcClient *RPCClient) Close() error {
 	return rpcLocalStack.Close()
 }
 
-func (rpcClient *RPCClient) Node() string {
+func (rpcClient *RPCClient) ServerAddr() string {
 	return rpcClient.node
 }
 
-func (rpcClient *RPCClient) RPCPath() string {
+func (rpcClient *RPCClient) Resource() string {
 	return rpcClient.rpcPath
 }
