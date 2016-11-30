@@ -23,33 +23,33 @@ import (
 	"time"
 )
 
-// RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
-type RPCClient struct {
+// ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
+type ReconnectRPCClient struct {
 	mu         sync.Mutex
 	rpcPrivate *rpc.Client
 	node       string
 	rpcPath    string
 }
 
-// newClient constructs a RPCClient object with node and rpcPath initialized.
+// newClient constructs a ReconnectRPCClient object with node and rpcPath initialized.
 // It _doesn't_ connect to the remote endpoint. See Call method to see when the
 // connect happens.
-func newClient(node, rpcPath string) *RPCClient {
-	return &RPCClient{
+func newClient(node, rpcPath string) *ReconnectRPCClient {
+	return &ReconnectRPCClient{
 		node:    node,
 		rpcPath: rpcPath,
 	}
 }
 
 // clearRPCClient clears the pointer to the rpc.Client object in a safe manner
-func (rpcClient *RPCClient) clearRPCClient() {
+func (rpcClient *ReconnectRPCClient) clearRPCClient() {
 	rpcClient.mu.Lock()
 	rpcClient.rpcPrivate = nil
 	rpcClient.mu.Unlock()
 }
 
 // getRPCClient gets the pointer to the rpc.Client object in a safe manner
-func (rpcClient *RPCClient) getRPCClient() *rpc.Client {
+func (rpcClient *ReconnectRPCClient) getRPCClient() *rpc.Client {
 	rpcClient.mu.Lock()
 	rpcLocalStack := rpcClient.rpcPrivate
 	rpcClient.mu.Unlock()
@@ -57,7 +57,7 @@ func (rpcClient *RPCClient) getRPCClient() *rpc.Client {
 }
 
 // dialRPCClient tries to establish a connection to the server in a safe manner
-func (rpcClient *RPCClient) dialRPCClient() (*rpc.Client, error) {
+func (rpcClient *ReconnectRPCClient) dialRPCClient() (*rpc.Client, error) {
 	rpcClient.mu.Lock()
 	defer rpcClient.mu.Unlock()
 	// After acquiring lock, check whether another thread may not have already dialed and established connection
@@ -75,7 +75,7 @@ func (rpcClient *RPCClient) dialRPCClient() (*rpc.Client, error) {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
 	SetTimestamp(time.Time)
 	SetToken(string)
 }, reply interface{}) error {
@@ -113,7 +113,7 @@ func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
 }
 
 // Close closes the underlying socket file descriptor.
-func (rpcClient *RPCClient) Close() error {
+func (rpcClient *ReconnectRPCClient) Close() error {
 	// See comment above for making a copy on local stack
 	rpcLocalStack := rpcClient.getRPCClient()
 
@@ -128,10 +128,10 @@ func (rpcClient *RPCClient) Close() error {
 	return rpcLocalStack.Close()
 }
 
-func (rpcClient *RPCClient) Node() string {
+func (rpcClient *ReconnectRPCClient) ServerAddr() string {
 	return rpcClient.node
 }
 
-func (rpcClient *RPCClient) RPCPath() string {
+func (rpcClient *ReconnectRPCClient) Resource() string {
 	return rpcClient.rpcPath
 }

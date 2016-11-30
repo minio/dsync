@@ -19,10 +19,11 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/minio/dsync"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/minio/dsync"
 )
 
 // used when cached timestamp do not match with what client remembers.
@@ -30,8 +31,8 @@ var errInvalidTimestamp = errors.New("Timestamps don't match, server may have re
 
 type lockRequesterInfo struct {
 	writer        bool      // Bool whether write or read lock
-	node          string    // Network address of client claiming lock
-	rpcPath       string    // RPC path of client claiming lock
+	serverAddr    string    // Network address of client claiming lock
+	resource      string    // RPC path of client claiming lock
 	uid           string    // Uid to uniquely identify request of client
 	timestamp     time.Time // Timestamp set at the time of initialization
 	timeLastCheck time.Time // Timestamp for last check of validity of lock
@@ -42,7 +43,7 @@ func isWriteLock(lri []lockRequesterInfo) bool {
 }
 
 type lockServer struct {
-	mutex sync.Mutex
+	mutex     sync.Mutex
 	lockMap   map[string][]lockRequesterInfo
 	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
@@ -66,8 +67,8 @@ func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 		l.lockMap[args.Name] = []lockRequesterInfo{
 			{
 				writer:        true,
-				node:          args.Node,
-				rpcPath:       args.RPCPath,
+				serverAddr:    args.ServerAddr,
+				resource:      args.Resource,
 				uid:           args.UID,
 				timestamp:     time.Now().UTC(),
 				timeLastCheck: time.Now().UTC(),
@@ -107,8 +108,8 @@ func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	}
 	lrInfo := lockRequesterInfo{
 		writer:        false,
-		node:          args.Node,
-		rpcPath:       args.RPCPath,
+		serverAddr:    args.ServerAddr,
+		resource:      args.Resource,
 		uid:           args.UID,
 		timestamp:     time.Now().UTC(),
 		timeLastCheck: time.Now().UTC(),
@@ -162,7 +163,7 @@ func (l *lockServer) ForceUnlock(args *dsync.LockArgs, reply *bool) error {
 }
 
 // Expired - rpc handler for expired lock status.
-func (l* lockServer) Expired(args *dsync.LockArgs, reply *bool) error {
+func (l *lockServer) Expired(args *dsync.LockArgs, reply *bool) error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	if err := l.validateLockArgs(args); err != nil {
@@ -259,7 +260,7 @@ func (l *lockServer) lockMaintenance(interval time.Duration) {
 	// Validate if long lived locks are indeed clean.
 	for _, nlrip := range nlripLongLived {
 		// Initialize client based on the long live locks.
-		c := newClient(nlrip.lri.node, nlrip.lri.rpcPath)
+		c := newClient(nlrip.lri.serverAddr, nlrip.lri.resource)
 
 		var expired bool
 

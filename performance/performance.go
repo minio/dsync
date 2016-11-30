@@ -27,14 +27,16 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"github.com/minio/dsync"
 )
 
-var nodes = []string{
+const rpcPath = "/dsync"
+
+var servers = []string{
 	"10.x0.y0.z0:12345",
 	"10.x1.y1.z1:12346",
 	"10.x2.y2.z2:12347",
@@ -45,8 +47,8 @@ var nodes = []string{
 	"10.x7.y7.z7:12352"}
 
 var (
-	portFlag = flag.Int("p", 0, "Port for server to listen on")
-	rpcPaths []string
+	portFlag  = flag.Int("p", 0, "Port for server to listen on")
+	resources []string
 )
 
 func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
@@ -59,7 +61,7 @@ func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr 
 	for run = 1; !*done && run <= runs; run++ {
 		dm.Lock()
 
-		if run == 1 { // re-initialize timing info to account for initial delay to start all nodes
+		if run == 1 { // re-initialize timing info to account for initial delay to start all servers
 			*timeStart = time.Now()
 			timeLast = time.Now()
 		}
@@ -85,7 +87,7 @@ func startRPCServer(port int) {
 		lockMap: make(map[string]int64),
 	})
 	// For some reason the registration paths need to be different (even for different server objs)
-	server.HandleHTTP(rpcPaths[port-12345], fmt.Sprintf("%s-debug", rpcPaths[port-12345]))
+	server.HandleHTTP(resources[port-12345], fmt.Sprintf("%s-debug", resources[port-12345]))
 	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if e != nil {
 		log.Fatal("listen error:", e)
@@ -94,7 +96,6 @@ func startRPCServer(port int) {
 }
 
 func main() {
-
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	flag.Parse()
@@ -103,18 +104,18 @@ func main() {
 		log.Fatalf("No port number specified")
 	}
 
-	rpcPaths = make([]string, 0, len(nodes)) // list of rpc paths where lock server is serving.
-	for i := range nodes {
-		rpcPaths = append(rpcPaths, dsync.RpcPath+"-"+strconv.Itoa(i))
+	resources = make([]string, 0, len(servers)) // list of rpc paths where lock server is serving.
+	for i := range servers {
+		resources = append(resources, rpcPath+"-"+strconv.Itoa(i))
 	}
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []dsync.RPC
-	for i := 0; i < len(nodes); i++ {
-		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
+	var clnts []dsync.RPCClient
+	for i := 0; i < len(servers); i++ {
+		clnts = append(clnts, newClient(servers[i], resources[i]))
 	}
 
-	if err := dsync.SetNodesWithClients(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+	if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -162,7 +163,7 @@ func main() {
 
 	fmt.Println("")
 	fmt.Printf("        Locks/sec: %7.0f\n", 1.0/(time.Since(timeStart).Seconds()/float64(totalRuns)))
-	fmt.Printf("         Msgs/sec: %7.0f\n", float64(len(nodes))*2.0*1.0/(time.Since(timeStart).Seconds()/float64(totalRuns)))
+	fmt.Printf("         Msgs/sec: %7.0f\n", float64(len(servers))*2.0*1.0/(time.Since(timeStart).Seconds()/float64(totalRuns)))
 	fmt.Printf(" Worst case delay: %5.3f s\n", delayMax)
 
 	if !done {
@@ -172,11 +173,11 @@ func main() {
 	}
 }
 
-func getSelfNode(rpcClnts []dsync.RPC, port int) int {
+func getSelfNode(rpcClnts []dsync.RPCClient, port int) int {
 
 	index := -1
 	for i, c := range rpcClnts {
-		p, _ := strconv.Atoi(strings.Split(c.Node(), ":")[1])
+		p, _ := strconv.Atoi(strings.Split(c.ServerAddr(), ":")[1])
 		if port == p {
 			if index == -1 {
 				index = i

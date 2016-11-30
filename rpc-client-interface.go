@@ -18,13 +18,13 @@ package dsync
 
 import "time"
 
-// RPC - is dsync compatible client interface.
-type RPC interface {
+// RPCClient - is dsync compatible client interface.
+type RPCClient interface {
 	Call(serviceMethod string, args interface {
 		SetToken(token string)
 		SetTimestamp(tstamp time.Time)
 	}, reply interface{}) error
-	Node() string
-	RPCPath() string
 	Close() error
+	ServerAddr() string
+	Resource() string
 }

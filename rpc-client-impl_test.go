@@ -24,26 +24,26 @@ import (
 	. "github.com/minio/dsync"
 )
 
-// RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
-type RPCClient struct {
+// ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
+type ReconnectRPCClient struct {
 	sync.Mutex
 	rpc     *rpc.Client
 	node    string
 	rpcPath string
 }
 
-// newClient constructs a RPCClient object with node and rpcPath initialized.
+// newClient constructs a ReconnectRPCClient object with node and rpcPath initialized.
 // It _doesn't_ connect to the remote endpoint. See Call method to see when the
 // connect happens.
-func newClient(node, rpcPath string) RPC {
-	return &RPCClient{
+func newClient(node, rpcPath string) RPCClient {
+	return &ReconnectRPCClient{
 		node:    node,
 		rpcPath: rpcPath,
 	}
 }
 
 // Close closes the underlying socket file descriptor.
-func (rpcClient *RPCClient) Close() error {
+func (rpcClient *ReconnectRPCClient) Close() error {
 	rpcClient.Lock()
 	defer rpcClient.Unlock()
 	// If rpc client has not connected yet there is nothing to close.
@@ -58,7 +58,7 @@ func (rpcClient *RPCClient) Close() error {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
 	SetToken(token string)
 	SetTimestamp(tstamp time.Time)
 }, reply interface{}) error {
@@ -83,11 +83,11 @@ func (rpcClient *RPCClient) Call(serviceMethod string, args interface {
 
 }
 
-func (rpcClient *RPCClient) Node() string {
+func (rpcClient *ReconnectRPCClient) ServerAddr() string {
 	return rpcClient.node
 }
 
-func (rpcClient *RPCClient) RPCPath() string {
+func (rpcClient *ReconnectRPCClient) Resource() string {
 	return rpcClient.rpcPath
 }
 

@@ -34,6 +34,7 @@ import (
 	. "github.com/minio/dsync"
 )
 
+const RpcPath = "/dsync"
 const N = 4           // number of lock servers for tests.
 var nodes []string    // list of node IP addrs or hostname with ports.
 var rpcPaths []string // list of rpc paths where lock server is serving.
@@ -73,13 +74,13 @@ func TestMain(m *testing.M) {
 	}
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []RPC
+	var clnts []RPCClient
 	for i := 0; i < len(nodes); i++ {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
 
 	rpcOwnNodeFakeForTest := 0
-	if err := SetNodesWithClients(clnts, rpcOwnNodeFakeForTest); err != nil {
+	if err := Init(clnts, rpcOwnNodeFakeForTest); err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 	startRPCServers(nodes)
