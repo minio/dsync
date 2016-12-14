@@ -22,7 +22,7 @@ import "errors"
 var dnodeCount int
 
 // List of rpc client objects, one per lock server.
-var clnts []RPCClient
+var clnts []NetLocker
 
 // Index into rpc client array for server running on localhost
 var ownNode int
@@ -36,7 +36,7 @@ var dquorumReads int
 // Init - initializes package-level global state variables such as clnts.
 // N B - This function should be called only once inside any program
 // that uses dsync.
-func Init(rpcClnts []RPCClient, rpcOwnNode int) (err error) {
+func Init(rpcClnts []NetLocker, rpcOwnNode int) (err error) {
 
 	// Validate if number of nodes is within allowable range.
 	if dnodeCount != 0 {
@@ -57,8 +57,8 @@ func Init(rpcClnts []RPCClient, rpcOwnNode int) (err error) {
 	dnodeCount = len(rpcClnts)
 	dquorum = dnodeCount/2 + 1
 	dquorumReads = dnodeCount / 2
-	// Initialize node name and rpc path for each RPCClient object.
-	clnts = make([]RPCClient, dnodeCount)
+	// Initialize node name and rpc path for each NetLocker object.
+	clnts = make([]NetLocker, dnodeCount)
 	copy(clnts, rpcClnts)
 
 	ownNode = rpcOwnNode

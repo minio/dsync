@@ -19,14 +19,13 @@ package dsync_test
 import (
 	"net/rpc"
 	"sync"
-	"time"
 
 	. "github.com/minio/dsync"
 )
 
 // ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
 type ReconnectRPCClient struct {
-	sync.Mutex
+	mutex   sync.Mutex
 	rpc     *rpc.Client
 	node    string
 	rpcPath string
@@ -35,7 +34,7 @@ type ReconnectRPCClient struct {
 // newClient constructs a ReconnectRPCClient object with node and rpcPath initialized.
 // It _doesn't_ connect to the remote endpoint. See Call method to see when the
 // connect happens.
-func newClient(node, rpcPath string) RPCClient {
+func newClient(node, rpcPath string) NetLocker {
 	return &ReconnectRPCClient{
 		node:    node,
 		rpcPath: rpcPath,
@@ -44,8 +43,8 @@ func newClient(node, rpcPath string) RPCClient {
 
 // Close closes the underlying socket file descriptor.
 func (rpcClient *ReconnectRPCClient) Close() error {
-	rpcClient.Lock()
-	defer rpcClient.Unlock()
+	rpcClient.mutex.Lock()
+	defer rpcClient.mutex.Unlock()
 	// If rpc client has not connected yet there is nothing to close.
 	if rpcClient.rpc == nil {
 		return nil
@@ -58,12 +57,9 @@ func (rpcClient *ReconnectRPCClient) Close() error {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
-	SetToken(token string)
-	SetTimestamp(tstamp time.Time)
-}, reply interface{}) error {
-	rpcClient.Lock()
-	defer rpcClient.Unlock()
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	rpcClient.mutex.Lock()
+	defer rpcClient.mutex.Unlock()
 	// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
 	if rpcClient.rpc == nil {
 		clnt, err := rpc.DialHTTPPath("tcp", rpcClient.node, rpcClient.rpcPath)
@@ -80,14 +76,38 @@ func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
 		rpcClient.rpc = nil
 	}
 	return err
+}
 
+func (rpcClient *ReconnectRPCClient) RLock(args LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.RLock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) Lock(args LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.Lock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) RUnlock(args LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.RUnlock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) Unlock(args LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.Unlock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) ForceUnlock(args LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.ForceUnlock", &args, &status)
+	return status, err
 }
 
 func (rpcClient *ReconnectRPCClient) ServerAddr() string {
 	return rpcClient.node
 }
 
-func (rpcClient *ReconnectRPCClient) Resource() string {
+func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
 	return rpcClient.rpcPath
 }
 
