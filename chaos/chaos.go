@@ -771,7 +771,7 @@ func killStaleProcesses(name string) bool {
 	if procs > 1 {
 		fmt.Println("Found more than one", name, "process. Killing all and exiting")
 		cmd = exec.Command("pkill", "-SIGKILL", name)
-		cmb, _ = cmd.CombinedOutput()
+		cmd.CombinedOutput()
 		return true
 	}
 	return false
