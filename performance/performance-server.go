@@ -31,8 +31,8 @@ const WriteLock = -1
 
 type lockServer struct {
 	mutex sync.Mutex
-						// Map of locks, with negative value indicating (exclusive) write lock
-						// and positive values indicating number of read locks
+	// Map of locks, with negative value indicating (exclusive) write lock
+	// and positive values indicating number of read locks
 	lockMap   map[string]int64
 	timestamp time.Time // Timestamp set at the time of initialization. Resets naturally on minio server restart.
 }
