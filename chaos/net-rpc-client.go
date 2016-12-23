@@ -20,7 +20,8 @@ import (
 	"errors"
 	"net/rpc"
 	"sync"
-	"time"
+
+	"github.com/minio/dsync"
 )
 
 // ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
@@ -75,10 +76,7 @@ func (rpcClient *ReconnectRPCClient) dialRPCClient() (*rpc.Client, error) {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
-	SetTimestamp(time.Time)
-	SetToken(string)
-}, reply interface{}) error {
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	// Make a copy below so that we can safely (continue to) work with the rpc.Client.
 	// Even in the case the two threads would simultaneously find that the connection is not initialised,
 	// they would both attempt to dial and only one of them would succeed in doing so.
@@ -112,6 +110,31 @@ func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface {
 	return err
 }
 
+func (rpcClient *ReconnectRPCClient) RLock(args dsync.LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.RLock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) Lock(args dsync.LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.Lock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) RUnlock(args dsync.LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.RUnlock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) Unlock(args dsync.LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.Unlock", &args, &status)
+	return status, err
+}
+
+func (rpcClient *ReconnectRPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
+	err = rpcClient.Call("Dsync.ForceUnlock", &args, &status)
+	return status, err
+}
+
 // Close closes the underlying socket file descriptor.
 func (rpcClient *ReconnectRPCClient) Close() error {
 	// See comment above for making a copy on local stack
@@ -132,6 +155,6 @@ func (rpcClient *ReconnectRPCClient) ServerAddr() string {
 	return rpcClient.node
 }
 
-func (rpcClient *ReconnectRPCClient) Resource() string {
+func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
 	return rpcClient.rpcPath
 }

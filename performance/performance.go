@@ -110,7 +110,7 @@ func main() {
 	}
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []dsync.RPCClient
+	var clnts []dsync.NetLocker
 	for i := 0; i < len(servers); i++ {
 		clnts = append(clnts, newClient(servers[i], resources[i]))
 	}
@@ -173,7 +173,7 @@ func main() {
 	}
 }
 
-func getSelfNode(rpcClnts []dsync.RPCClient, port int) int {
+func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
 
 	index := -1
 	for i, c := range rpcClnts {

@@ -617,7 +617,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
 	}
 }
 
-func getSelfNode(rpcClnts []dsync.RPCClient, port int) int {
+func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
 
 	index := -1
 	for i, c := range rpcClnts {
@@ -644,7 +644,7 @@ func main() {
 		if *writeLockFlag != "" || *readLockFlag != "" {
 			go func() {
 				// Initialize net/rpc clients for dsync.
-				var clnts []dsync.RPCClient
+				var clnts []dsync.NetLocker
 				for i := 0; i < n; i++ {
 					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 				}
@@ -691,7 +691,7 @@ func main() {
 	servers = append(servers, launchTestServers(1, n-1)...)
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []dsync.RPCClient
+	var clnts []dsync.NetLocker
 	for i := 0; i < n; i++ {
 		clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 	}

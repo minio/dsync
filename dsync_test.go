@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Initialize net/rpc clients for dsync.
-	var clnts []RPCClient
+	var clnts []NetLocker
 	for i := 0; i < len(nodes); i++ {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
@@ -87,12 +87,12 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Should have failed")
 	}
 
-	nclnts := make([]RPCClient, 17)
+	nclnts := make([]NetLocker, 17)
 	if err := Init(nclnts, 0); err == nil {
 		log.Fatalf("Should have failed")
 	}
 
-	nclnts = make([]RPCClient, 15)
+	nclnts = make([]NetLocker, 15)
 	if err := Init(nclnts, 0); err == nil {
 		log.Fatalf("Should have failed")
 	}
