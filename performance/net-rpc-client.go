@@ -17,144 +17,99 @@
 package main
 
 import (
-	"errors"
 	"net/rpc"
 	"sync"
 
 	"github.com/minio/dsync"
 )
 
-// RPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
-type RPCClient struct {
-	mu         sync.Mutex
-	rpcPrivate *rpc.Client
-	node       string
-	rpcPath    string
+// ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
+type ReconnectRPCClient struct {
+	mutex    sync.Mutex
+	rpc      *rpc.Client
+	addr     string
+	endpoint string
 }
 
-// newClient constructs a RPCClient object with node and rpcPath initialized.
+// newClient constructs a ReconnectRPCClient object with addr and endpoint initialized.
 // It _doesn't_ connect to the remote endpoint. See Call method to see when the
 // connect happens.
-func newClient(node, rpcPath string) *RPCClient {
-	return &RPCClient{
-		node:    node,
-		rpcPath: rpcPath,
+func newClient(addr, endpoint string) *ReconnectRPCClient {
+	return &ReconnectRPCClient{
+		addr:     addr,
+		endpoint: endpoint,
 	}
 }
 
-// clearRPCClient clears the pointer to the rpc.Client object in a safe manner
-func (rpcClient *RPCClient) clearRPCClient() {
-	rpcClient.mu.Lock()
-	rpcClient.rpcPrivate = nil
-	rpcClient.mu.Unlock()
-}
-
-// getRPCClient gets the pointer to the rpc.Client object in a safe manner
-func (rpcClient *RPCClient) getRPCClient() *rpc.Client {
-	rpcClient.mu.Lock()
-	rpcLocalStack := rpcClient.rpcPrivate
-	rpcClient.mu.Unlock()
-	return rpcLocalStack
-}
-
-// dialRPCClient tries to establish a connection to the server in a safe manner
-func (rpcClient *RPCClient) dialRPCClient() (*rpc.Client, error) {
-	rpcClient.mu.Lock()
-	defer rpcClient.mu.Unlock()
-	// After acquiring lock, check whether another thread may not have already dialed and established connection
-	if rpcClient.rpcPrivate != nil {
-		return rpcClient.rpcPrivate, nil
+// Close closes the underlying socket file descriptor.
+func (rpcClient *ReconnectRPCClient) Close() error {
+	rpcClient.mutex.Lock()
+	defer rpcClient.mutex.Unlock()
+	// If rpc client has not connected yet there is nothing to close.
+	if rpcClient.rpc == nil {
+		return nil
 	}
-	rpc, err := rpc.DialHTTPPath("tcp", rpcClient.node, rpcClient.rpcPath)
-	if err != nil {
-		return nil, err
-	} else if rpc == nil {
-		return nil, errors.New("No valid RPC Client created after dial")
-	}
-	rpcClient.rpcPrivate = rpc
-	return rpcClient.rpcPrivate, nil
+	// Reset rpcClient.rpc to allow for subsequent calls to use a new
+	// (socket) connection.
+	clnt := rpcClient.rpc
+	rpcClient.rpc = nil
+	return clnt.Close()
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *RPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	// Make a copy below so that we can safely (continue to) work with the rpc.Client.
-	// Even in the case the two threads would simultaneously find that the connection is not initialised,
-	// they would both attempt to dial and only one of them would succeed in doing so.
-	rpcLocalStack := rpcClient.getRPCClient()
-
-	// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
-	if rpcLocalStack == nil {
-		var err error
-		rpcLocalStack, err = rpcClient.dialRPCClient()
-		if err != nil {
-			return err
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	rpcClient.mutex.Lock()
+	defer rpcClient.mutex.Unlock()
+	dialCall := func() error {
+		// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
+		if rpcClient.rpc == nil {
+			clnt, derr := rpc.DialHTTPPath("tcp", rpcClient.addr, rpcClient.endpoint)
+			if derr != nil {
+				return derr
+			}
+			rpcClient.rpc = clnt
 		}
+		// If the RPC fails due to a network-related error, then we reset
+		// rpc.Client for a subsequent reconnect.
+		return rpcClient.rpc.Call(serviceMethod, args, reply)
 	}
-
-	// If the RPC fails due to a network-related error, then we reset
-	// rpc.Client for a subsequent reconnect.
-	err := rpcLocalStack.Call(serviceMethod, args, reply)
-	if err != nil {
-		if err.Error() == rpc.ErrShutdown.Error() {
-			// Reset rpcClient.rpc to nil to trigger a reconnect in future
-			// and close the underlying connection.
-			rpcClient.clearRPCClient()
-
-			// Close the underlying connection.
-			rpcLocalStack.Close()
-
-			// Set rpc error as rpc.ErrShutdown type.
-			err = rpc.ErrShutdown
-		}
+	if err = dialCall(); err == rpc.ErrShutdown {
+		rpcClient.rpc.Close()
+		rpcClient.rpc = nil
+		err = dialCall()
 	}
 	return err
 }
 
-func (rpcClient *RPCClient) RLock(args dsync.LockArgs) (status bool, err error) {
+func (rpcClient *ReconnectRPCClient) RLock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.RLock", &args, &status)
 	return status, err
 }
 
-func (rpcClient *RPCClient) Lock(args dsync.LockArgs) (status bool, err error) {
+func (rpcClient *ReconnectRPCClient) Lock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.Lock", &args, &status)
 	return status, err
 }
 
-func (rpcClient *RPCClient) RUnlock(args dsync.LockArgs) (status bool, err error) {
+func (rpcClient *ReconnectRPCClient) RUnlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.RUnlock", &args, &status)
 	return status, err
 }
 
-func (rpcClient *RPCClient) Unlock(args dsync.LockArgs) (status bool, err error) {
+func (rpcClient *ReconnectRPCClient) Unlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.Unlock", &args, &status)
 	return status, err
 }
 
-func (rpcClient *RPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
+func (rpcClient *ReconnectRPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.ForceUnlock", &args, &status)
 	return status, err
 }
 
-// Close closes the underlying socket file descriptor.
-func (rpcClient *RPCClient) Close() error {
-	// See comment above for making a copy on local stack
-	rpcLocalStack := rpcClient.getRPCClient()
-
-	// If rpc client has not connected yet there is nothing to close.
-	if rpcLocalStack == nil {
-		return nil
-	}
-
-	// Reset rpcClient.rpc to allow for subsequent calls to use a new
-	// (socket) connection.
-	rpcClient.clearRPCClient()
-	return rpcLocalStack.Close()
+func (rpcClient *ReconnectRPCClient) ServerAddr() string {
+	return rpcClient.addr
 }
 
-func (rpcClient *RPCClient) ServerAddr() string {
-	return rpcClient.node
-}
-
-func (rpcClient *RPCClient) ServiceEndpoint() string {
-	return rpcClient.rpcPath
+func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
+	return rpcClient.endpoint
 }

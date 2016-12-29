@@ -25,19 +25,19 @@ import (
 
 // ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
 type ReconnectRPCClient struct {
-	mutex   sync.Mutex
-	rpc     *rpc.Client
-	node    string
-	rpcPath string
+	mutex    sync.Mutex
+	rpc      *rpc.Client
+	addr     string
+	endpoint string
 }
 
-// newClient constructs a ReconnectRPCClient object with node and rpcPath initialized.
+// newClient constructs a ReconnectRPCClient object with addr and endpoint initialized.
 // It _doesn't_ connect to the remote endpoint. See Call method to see when the
 // connect happens.
-func newClient(node, rpcPath string) NetLocker {
+func newClient(addr, endpoint string) NetLocker {
 	return &ReconnectRPCClient{
-		node:    node,
-		rpcPath: rpcPath,
+		addr:     addr,
+		endpoint: endpoint,
 	}
 }
 
@@ -57,23 +57,26 @@ func (rpcClient *ReconnectRPCClient) Close() error {
 }
 
 // Call makes a RPC call to the remote endpoint using the default codec, namely encoding/gob.
-func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
 	rpcClient.mutex.Lock()
 	defer rpcClient.mutex.Unlock()
-	// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
-	if rpcClient.rpc == nil {
-		clnt, err := rpc.DialHTTPPath("tcp", rpcClient.node, rpcClient.rpcPath)
-		if err != nil {
-			return err
+	dialCall := func() error {
+		// If the rpc.Client is nil, we attempt to (re)connect with the remote endpoint.
+		if rpcClient.rpc == nil {
+			clnt, derr := rpc.DialHTTPPath("tcp", rpcClient.addr, rpcClient.endpoint)
+			if derr != nil {
+				return derr
+			}
+			rpcClient.rpc = clnt
 		}
-		rpcClient.rpc = clnt
+		// If the RPC fails due to a network-related error, then we reset
+		// rpc.Client for a subsequent reconnect.
+		return rpcClient.rpc.Call(serviceMethod, args, reply)
 	}
-
-	// If the RPC fails due to a network-related error, then we reset
-	// rpc.Client for a subsequent reconnect.
-	err := rpcClient.rpc.Call(serviceMethod, args, reply)
-	if IsRPCError(err) {
+	if err = dialCall(); err == rpc.ErrShutdown {
+		rpcClient.rpc.Close()
 		rpcClient.rpc = nil
+		err = dialCall()
 	}
 	return err
 }
@@ -104,24 +107,9 @@ func (rpcClient *ReconnectRPCClient) ForceUnlock(args LockArgs) (status bool, er
 }
 
 func (rpcClient *ReconnectRPCClient) ServerAddr() string {
-	return rpcClient.node
+	return rpcClient.addr
 }
 
 func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
-	return rpcClient.rpcPath
-}
-
-// IsRPCError returns true if the error value is due to a network related
-// failure, false otherwise.
-func IsRPCError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// The following are net/rpc specific errors that indicate that
-	// the connection may have been reset. Reset rpcClient.rpc to nil
-	// to trigger a reconnect in future.
-	if err == rpc.ErrShutdown {
-		return true
-	}
-	return false
+	return rpcClient.endpoint
 }
