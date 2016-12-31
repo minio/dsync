@@ -381,12 +381,12 @@ func (dm *DRWMutex) ForceUnlock() {
 func sendRelease(c NetLocker, name, uid string, isReadLock bool) {
 
 	backOffArray := []time.Duration{
-		30 * time.Second, // 30secs.
-		1 * time.Minute,  // 1min.
-		3 * time.Minute,  // 3min.
-		10 * time.Minute, // 10min.
-		30 * time.Minute, // 30min.
-		1 * time.Hour,    // 1hr.
+		30 * time.Second, // 30 secs
+		1 * time.Minute,  // 1 min
+		3 * time.Minute,  // 3 min
+		10 * time.Minute, // 10 min
+		30 * time.Minute, // 30 min
+		1 * time.Hour,    // 1 hour
 	}
 
 	go func(c NetLocker, name string) {

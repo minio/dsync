@@ -127,43 +127,65 @@ func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}
 	rpcClient.mutex.Lock()
 	if rpcClient.sessionID == "" {
 		loginArgs := NewLoginArgs("admin", "adm1npasswo7d")
-		if err = rpcClient.Call("LockServer.Login", &loginArgs, &rpcClient.sessionID); err != nil {
+		if err = netRPCClient.Call("LockServer.Login", &loginArgs, &rpcClient.sessionID); err != nil {
 			rpcClient.mutex.Unlock()
+			if err == rpc.ErrShutdown {
+				rpcClient.Close()
+			}
 			return err
 		}
 	}
 	rpcClient.mutex.Unlock()
 
-	return netRPCClient.Call(serviceMethod, args, reply)
+	err = netRPCClient.Call(serviceMethod, args, reply)
+	if err == rpc.ErrShutdown {
+		netRPCClient.Close()
+	}
+	return err
 }
 
 func (rpcClient *ReconnectRPCClient) RLock(args dsync.LockArgs) (status bool, err error) {
 	lockArgs := NewLockArgs(args, rpcClient.sessionID)
 	err = rpcClient.Call("LockServer.RLock", &lockArgs, &status)
+	if err == rpc.ErrShutdown {
+		err = rpcClient.Call("LockServer.RLock", &lockArgs, &status)
+	}
 	return status, err
 }
 
 func (rpcClient *ReconnectRPCClient) Lock(args dsync.LockArgs) (status bool, err error) {
 	lockArgs := NewLockArgs(args, rpcClient.sessionID)
 	err = rpcClient.Call("LockServer.Lock", &lockArgs, &status)
+	if err == rpc.ErrShutdown {
+		err = rpcClient.Call("LockServer.Lock", &lockArgs, &status)
+	}
 	return status, err
 }
 
 func (rpcClient *ReconnectRPCClient) RUnlock(args dsync.LockArgs) (status bool, err error) {
 	lockArgs := NewLockArgs(args, rpcClient.sessionID)
 	err = rpcClient.Call("LockServer.RUnlock", &lockArgs, &status)
+	if err == rpc.ErrShutdown {
+		err = rpcClient.Call("LockServer.RUnlock", &lockArgs, &status)
+	}
 	return status, err
 }
 
 func (rpcClient *ReconnectRPCClient) Unlock(args dsync.LockArgs) (status bool, err error) {
 	lockArgs := NewLockArgs(args, rpcClient.sessionID)
 	err = rpcClient.Call("LockServer.Unlock", &lockArgs, &status)
+	if err == rpc.ErrShutdown {
+		err = rpcClient.Call("LockServer.Unlock", &lockArgs, &status)
+	}
 	return status, err
 }
 
 func (rpcClient *ReconnectRPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
 	lockArgs := NewLockArgs(args, rpcClient.sessionID)
 	err = rpcClient.Call("LockServer.ForceUnlock", &lockArgs, &status)
+	if err == rpc.ErrShutdown {
+		err = rpcClient.Call("LockServer.ForceUnlock", &lockArgs, &status)
+	}
 	return status, err
 }
 
@@ -175,7 +197,7 @@ func (rpcClient *ReconnectRPCClient) Close() (err error) {
 
 	if netRPCClient != nil {
 		var status bool
-		rpcClient.Call("LockServer.Logout", &rpcClient.sessionID, &status)
+		netRPCClient.Call("LockServer.Logout", &rpcClient.sessionID, &status)
 
 		rpcClient.mutex.Lock()
 		rpcClient.netRPCClient = nil
