@@ -57,7 +57,7 @@ This table shows test performance on the same (EC2) instance type but with a var
 | c3.2xlarge           |    12 | (min=1239, max=1558) |           16782 |       25% |
 | c3.2xlarge           |    16 |  (min=996, max=1391) |           19096 |       25% |
 
-The mix and max locks/server/sec gradually declines but due to the larger number of nodes the overall total number of locks rises steadily (at the same CPU usage level).
+The min and max locks/server/sec gradually declines but due to the larger number of nodes the overall total number of locks rises steadily (at the same CPU usage level).
 
 ### Performance with difference instance types
 
