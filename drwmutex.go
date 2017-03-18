@@ -435,14 +435,3 @@ func sendRelease(c NetLocker, name, uid string, isReadLock bool) {
 		}
 	}(c, name)
 }
-
-// DRLocker returns a sync.Locker interface that implements
-// the Lock and Unlock methods by calling drw.RLock and drw.RUnlock.
-func (dm *DRWMutex) DRLocker() sync.Locker {
-	return (*drlocker)(dm)
-}
-
-type drlocker DRWMutex
-
-func (dr *drlocker) Lock()   { (*DRWMutex)(dr).RLock() }
-func (dr *drlocker) Unlock() { (*DRWMutex)(dr).RUnlock() }
