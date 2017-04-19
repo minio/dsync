@@ -20,9 +20,6 @@ import (
 	cryptorand "crypto/rand"
 	"fmt"
 	golog "log"
-	"math"
-	"math/rand"
-	"net"
 	"os"
 	"sync"
 	"time"
@@ -43,7 +40,7 @@ func log(msg ...interface{}) {
 }
 
 // DRWMutexAcquireTimeout - tolerance limit to wait for lock acquisition before.
-const DRWMutexAcquireTimeout = 25 * time.Millisecond // 25ms.
+const DRWMutexAcquireTimeout = 1 * time.Second // 1 second.
 
 // A DRWMutex is a distributed mutual exclusion lock.
 type DRWMutex struct {
@@ -98,10 +95,12 @@ func (dm *DRWMutex) RLock() {
 // The call will block until the lock is granted using a built-in
 // timing randomized back-off algorithm to try again until successful
 func (dm *DRWMutex) lockBlocking(isReadLock bool) {
+	doneCh := make(chan struct{})
+	defer close(doneCh)
 
-	runs, backOff := 1, 1
-
-	for {
+	// We timed out on the previous lock, incrementally wait
+	// for a longer back-off time and try again afterwards
+	for range newRetryTimerSimple(doneCh) {
 		// create temp array on stack
 		locks := make([]string, dnodeCount)
 
@@ -123,19 +122,8 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 
 			return
 		}
-
-		// We timed out on the previous lock, incrementally wait for a longer back-off time,
-		// and try again afterwards
-		time.Sleep(time.Duration(backOff) * time.Millisecond)
-
-		backOff += int(rand.Float64() * math.Pow(2, float64(runs)))
-		if backOff > 1024 {
-			backOff = backOff % 64
-
-			runs = 1 // reset runs
-		} else if runs < 10 {
-			runs++
-		}
+		// We timed out on the previous lock, incrementally wait
+		// for a longer back-off time and try again afterwards
 	}
 }
 
@@ -145,11 +133,15 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 
 	// Create buffered channel of size equal to total number of nodes.
 	ch := make(chan Granted, dnodeCount)
+	defer close(ch)
 
+	var wg sync.WaitGroup
 	for index, c := range clnts {
+		wg.Add(1)
 
 		// broadcast lock request to all nodes
 		go func(index int, isReadLock bool, c NetLocker) {
+			defer wg.Done()
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
 			bytesUid := [16]byte{}
@@ -179,6 +171,7 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 			if locked {
 				g.lockUid = args.UID
 			}
+
 			ch <- g
 
 		}(index, isReadLock, c)
@@ -186,11 +179,15 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 
 	quorum := false
 
-	var wg sync.WaitGroup
 	wg.Add(1)
 	go func(isReadLock bool) {
 
-		// Wait until we have either a) received all lock responses, b) received too many 'non-'locks for quorum to be or c) time out
+		// Wait until we have either
+		//
+		// a) received all lock responses,
+		// b) received too many 'non-'locks for quorum to be or
+		// c) time out
+		//
 		i, locksFailed := 0, 0
 		done := false
 		timeout := time.After(DRWMutexAcquireTimeout)
@@ -206,15 +203,14 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 					locksFailed++
 					if !isReadLock && locksFailed > dnodeCount-dquorum ||
 						isReadLock && locksFailed > dnodeCount-dquorumReads {
-						// We know that we are not going to get the lock anymore, so exit out
-						// and release any locks that did get acquired
+						// We know that we are not going to get the lock anymore,
+						// so exit out and release any locks that did get acquired
 						done = true
 						// Increment the number of grants received from the buffered channel.
 						i++
 						releaseAll(clnts, locks, lockName, isReadLock)
 					}
 				}
-
 			case <-timeout:
 				done = true
 				// timeout happened, maybe one of the nodes is slow, count
@@ -229,7 +225,7 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 			}
 		}
 
-		// Count locks in order to determine whterh we have quorum or not
+		// Count locks in order to determine whether we have quorum or not
 		quorum = quorumMet(locks, isReadLock)
 
 		// Signal that we have the quorum
@@ -379,61 +375,28 @@ func (dm *DRWMutex) ForceUnlock() {
 
 // sendRelease sends a release message to a node that previously granted a lock
 func sendRelease(c NetLocker, name, uid string, isReadLock bool) {
-
-	backOffArray := []time.Duration{
-		30 * time.Second, // 30 secs
-		1 * time.Minute,  // 1 min
-		3 * time.Minute,  // 3 min
-		10 * time.Minute, // 10 min
-		30 * time.Minute, // 30 min
-		1 * time.Hour,    // 1 hour
+	// All client methods issuing RPCs are thread-safe and goroutine-safe,
+	// i.e. it is safe to call them from multiple concurrently running goroutines.
+	args := LockArgs{
+		UID:             uid,
+		Resource:        name,
+		ServerAddr:      clnts[ownNode].ServerAddr(),
+		ServiceEndpoint: clnts[ownNode].ServiceEndpoint(),
 	}
 
-	go func(c NetLocker, name string) {
-
-		for _, backOff := range backOffArray {
-
-			// All client methods issuing RPCs are thread-safe and goroutine-safe,
-			// i.e. it is safe to call them from multiple concurrently running goroutines.
-			args := LockArgs{
-				UID:             uid,
-				Resource:        name,
-				ServerAddr:      clnts[ownNode].ServerAddr(),
-				ServiceEndpoint: clnts[ownNode].ServiceEndpoint(),
-			}
-
-			var err error
-			if len(uid) == 0 {
-				if _, err = c.ForceUnlock(args); err != nil {
-					log("Unable to call ForceUnlock", err)
-				}
-			} else if isReadLock {
-				if _, err = c.RUnlock(args); err != nil {
-					log("Unable to call RUnlock", err)
-				}
-			} else {
-				if _, err = c.Unlock(args); err != nil {
-					log("Unable to call Unlock", err)
-				}
-			}
-
-			if err != nil {
-				// Ignore if err is net.Error and it is occurred due to timeout.
-				// The cause could have been server timestamp mismatch or server may have restarted.
-				// FIXME: This is minio specific behaviour and we would need a way to make it generically.
-				if nErr, ok := err.(net.Error); ok && nErr.Timeout() {
-					err = nil
-				}
-			}
-
-			if err == nil {
-				return
-			}
-
-			// Wait..
-			time.Sleep(backOff)
+	if len(uid) == 0 {
+		if _, err := c.ForceUnlock(args); err != nil {
+			log("Unable to call ForceUnlock", err)
 		}
-	}(c, name)
+	} else if isReadLock {
+		if _, err := c.RUnlock(args); err != nil {
+			log("Unable to call RUnlock", err)
+		}
+	} else {
+		if _, err := c.Unlock(args); err != nil {
+			log("Unable to call Unlock", err)
+		}
+	}
 }
 
 // DRLocker returns a sync.Locker interface that implements
