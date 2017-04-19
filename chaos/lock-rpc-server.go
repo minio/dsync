@@ -217,7 +217,7 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo, interval time.Duration)
 // lockMaintenance loops over locks that have been active for some time and checks back
 // with the original server whether it is still alive or not
 //
-// Following logic inside ignores the errors generated for Dsync.Active operation.
+// Following logic inside ignores the errors generated for Dsync.Expired operation.
 // - server at client down
 // - some network error (and server is up normally)
 //

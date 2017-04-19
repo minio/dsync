@@ -50,19 +50,21 @@ type DRWMutex struct {
 	m            sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 }
 
+// Granted - represents a structure of a granted lock.
 type Granted struct {
 	index   int
-	lockUid string // Locked if set with UID string, unlocked if empty
+	lockUID string // Locked if set with UID string, unlocked if empty
 }
 
 func (g *Granted) isLocked() bool {
-	return isLocked(g.lockUid)
+	return isLocked(g.lockUID)
 }
 
 func isLocked(uid string) bool {
 	return len(uid) > 0
 }
 
+// NewDRWMutex - initializes a new dsync RW mutex.
 func NewDRWMutex(name string) *DRWMutex {
 	return &DRWMutex{
 		Name:       name,
@@ -99,20 +101,20 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 	defer close(doneCh)
 
 	// We timed out on the previous lock, incrementally wait
-	// for a longer back-off time and try again afterwards
+	// for a longer back-off time and try again afterwards.
 	for range newRetryTimerSimple(doneCh) {
-		// create temp array on stack
+		// Create temp array on stack.
 		locks := make([]string, dnodeCount)
 
-		// try to acquire the lock
+		// Try to acquire the lock.
 		success := lock(clnts, &locks, dm.Name, isReadLock)
 		if success {
 			dm.m.Lock()
 			defer dm.m.Unlock()
 
-			// if success, copy array to object
+			// If success, copy array to object
 			if isReadLock {
-				// append new array of strings at the end
+				// Append new array of strings at the end
 				dm.readersLocks = append(dm.readersLocks, make([]string, dnodeCount))
 				// and copy stack array into last spot
 				copy(dm.readersLocks[len(dm.readersLocks)-1], locks[:])
@@ -123,12 +125,11 @@ func (dm *DRWMutex) lockBlocking(isReadLock bool) {
 			return
 		}
 		// We timed out on the previous lock, incrementally wait
-		// for a longer back-off time and try again afterwards
+		// for a longer back-off time and try again afterwards.
 	}
 }
 
-// lock tries to acquire the distributed lock, returning true or false
-//
+// lock tries to acquire the distributed lock, returning true or false.
 func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) bool {
 
 	// Create buffered channel of size equal to total number of nodes.
@@ -137,16 +138,17 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 
 	var wg sync.WaitGroup
 	for index, c := range clnts {
-		wg.Add(1)
 
+		wg.Add(1)
 		// broadcast lock request to all nodes
 		go func(index int, isReadLock bool, c NetLocker) {
 			defer wg.Done()
+
 			// All client methods issuing RPCs are thread-safe and goroutine-safe,
 			// i.e. it is safe to call them from multiple concurrently running go routines.
-			bytesUid := [16]byte{}
-			cryptorand.Read(bytesUid[:])
-			uid := fmt.Sprintf("%X", bytesUid[:])
+			bytesUID := [16]byte{}
+			cryptorand.Read(bytesUID[:])
+			uid := fmt.Sprintf("%X", bytesUID[:])
 
 			args := LockArgs{
 				UID:             uid,
@@ -169,7 +171,7 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 
 			g := Granted{index: index}
 			if locked {
-				g.lockUid = args.UID
+				g.lockUID = args.UID
 			}
 
 			ch <- g
@@ -184,8 +186,8 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 
 		// Wait until we have either
 		//
-		// a) received all lock responses,
-		// b) received too many 'non-'locks for quorum to be or
+		// a) received all lock responses
+		// b) received too many 'non-'locks for quorum to be still possible
 		// c) time out
 		//
 		i, locksFailed := 0, 0
@@ -198,7 +200,7 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 			case grant := <-ch:
 				if grant.isLocked() {
 					// Mark that this node has acquired the lock
-					(*locks)[grant.index] = grant.lockUid
+					(*locks)[grant.index] = grant.lockUID
 				} else {
 					locksFailed++
 					if !isReadLock && locksFailed > dnodeCount-dquorum ||
@@ -238,7 +240,7 @@ func lock(clnts []NetLocker, locks *[]string, lockName string, isReadLock bool) 
 			grantToBeReleased := <-ch
 			if grantToBeReleased.isLocked() {
 				// release lock
-				sendRelease(clnts[grantToBeReleased.index], lockName, grantToBeReleased.lockUid, isReadLock)
+				sendRelease(clnts[grantToBeReleased.index], lockName, grantToBeReleased.lockUID, isReadLock)
 			}
 		}
 	}(isReadLock)
@@ -265,11 +267,14 @@ func quorumMet(locks *[]string, isReadLock bool) bool {
 		}
 	}
 
+	var quorum bool
 	if isReadLock {
-		return count >= dquorumReads
+		quorum = count >= dquorumReads
 	} else {
-		return count >= dquorum
+		quorum = count >= dquorum
 	}
+
+	return quorum
 }
 
 // releaseAll releases all locks that are marked as locked
@@ -356,7 +361,6 @@ func unlock(locks []string, name string, isReadLock bool) {
 
 // ForceUnlock will forcefully clear a write or read lock.
 func (dm *DRWMutex) ForceUnlock() {
-
 	{
 		dm.m.Lock()
 		defer dm.m.Unlock()
@@ -375,15 +379,12 @@ func (dm *DRWMutex) ForceUnlock() {
 
 // sendRelease sends a release message to a node that previously granted a lock
 func sendRelease(c NetLocker, name, uid string, isReadLock bool) {
-	// All client methods issuing RPCs are thread-safe and goroutine-safe,
-	// i.e. it is safe to call them from multiple concurrently running goroutines.
 	args := LockArgs{
 		UID:             uid,
 		Resource:        name,
 		ServerAddr:      clnts[ownNode].ServerAddr(),
 		ServiceEndpoint: clnts[ownNode].ServiceEndpoint(),
 	}
-
 	if len(uid) == 0 {
 		if _, err := c.ForceUnlock(args); err != nil {
 			log("Unable to call ForceUnlock", err)
