@@ -28,7 +28,7 @@ import (
 type lockRequesterInfo struct {
 	writer        bool      // Bool whether write or read lock
 	serverAddr    string    // Network address of client claiming lock
-	resource      string    // RPC path of client claiming lock
+	rpcPath       string    // RPC path of client claiming lock
 	uid           string    // Uid to uniquely identify request of client
 	timestamp     time.Time // Timestamp set at the time of initialization
 	timeLastCheck time.Time // Timestamp for last check of validity of lock
@@ -54,7 +54,7 @@ func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 			{
 				writer:        true,
 				serverAddr:    args.ServerAddr,
-				resource:      args.Resource,
+				rpcPath:       args.ServiceEndpoint,
 				uid:           args.UID,
 				timestamp:     time.Now().UTC(),
 				timeLastCheck: time.Now().UTC(),
@@ -89,7 +89,7 @@ func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	lrInfo := lockRequesterInfo{
 		writer:        false,
 		serverAddr:    args.ServerAddr,
-		resource:      args.Resource,
+		rpcPath:       args.ServiceEndpoint,
 		uid:           args.UID,
 		timestamp:     time.Now().UTC(),
 		timeLastCheck: time.Now().UTC(),
@@ -231,7 +231,7 @@ func (l *lockServer) lockMaintenance(interval time.Duration) {
 	// Validate if long lived locks are indeed clean.
 	for _, nlrip := range nlripLongLived {
 		// Initialize client based on the long live locks.
-		c := newClient(nlrip.lri.serverAddr, nlrip.lri.resource)
+		c := newClient(nlrip.lri.serverAddr, nlrip.lri.rpcPath)
 
 		var expired bool
 
