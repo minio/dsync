@@ -111,7 +111,7 @@ func (dm *DRWMutex) GetRLock(timeout time.Duration) (locked bool) {
 // The call will block until the lock is granted using a built-in
 // timing randomized back-off algorithm to try again until successful
 func (dm *DRWMutex) lockBlocking(timeout time.Duration, isReadLock bool) bool {
-	doneCh, start := make(chan struct{}), time.Now()
+	doneCh, start := make(chan struct{}), time.Now().UTC()
 	defer close(doneCh)
 
 	// We timed out on the previous lock, incrementally wait
@@ -138,7 +138,7 @@ func (dm *DRWMutex) lockBlocking(timeout time.Duration, isReadLock bool) bool {
 
 			return true
 		}
-		if time.Since(start) >= timeout { // Are we past the timeout?
+		if time.Now().UTC().Sub(start) >= timeout { // Are we past the timeout?
 			break
 		}
 		// We timed out on the previous lock, incrementally wait
