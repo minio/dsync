@@ -25,6 +25,7 @@ import (
 	"net/rpc"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,9 +34,11 @@ import (
 //
 // const LockMaintenanceLoop       = 1 * time.Minute
 // const LockCheckValidityInterval = 2 * time.Minute
+// const LockMaintenanceHealthThreshold = 5 * LockMaintenanceLoop
 //
 const LockMaintenanceLoop = 1 * time.Second
 const LockCheckValidityInterval = 5 * time.Second
+const LockMaintenanceHealthThreshold = 10 * LockMaintenanceLoop
 
 func startRPCServer(port int) {
 	log.SetPrefix(fmt.Sprintf("[%d] ", port))
@@ -47,14 +50,40 @@ func startRPCServer(port int) {
 		lockMap: make(map[string][]lockRequesterInfo),
 		// timestamp: leave uninitialized for testing (set to real timestamp for actual usage)
 	}
-	go func() {
+	lockHeartBeat := uint64(0)
+
+	lockMaintainer := func() {
 		// Start with random sleep time, so as to avoid "synchronous checks" between servers
 		time.Sleep(time.Duration(rand.Float64() * float64(LockMaintenanceLoop)))
 		for {
 			time.Sleep(LockMaintenanceLoop)
 			locker.lockMaintenance(LockCheckValidityInterval)
+			atomic.AddUint64(&lockHeartBeat, 1)
 		}
-	}()
+	}
+	lockMonitor := func() {
+		lastHeartBeat := uint64(0)
+		lastHeartBeatStamp := time.Now().UTC()
+		for {
+			time.Sleep(LockMaintenanceLoop)
+			currentHeartBeat := atomic.LoadUint64(&lockHeartBeat)
+			if currentHeartBeat > lastHeartBeat {
+				lastHeartBeat = currentHeartBeat
+				lastHeartBeatStamp = time.Now()
+			} else if time.Now().UTC().Sub(lastHeartBeatStamp) > LockMaintenanceHealthThreshold {
+				// Too much time has passed since last 'sign' of life from maintenance loop
+
+				atomic.StoreUint64(&lockHeartBeat, 0) // Reset state to initiate new monitoring
+				lastHeartBeat = uint64(0)
+				lastHeartBeatStamp = time.Now()
+
+				// restart maintainer
+				go lockMaintainer()
+			}
+		}
+	}
+	go lockMaintainer()
+	go lockMonitor()
 	server.RegisterName("Dsync", locker)
 	// For some reason the registration paths need to be different (even for different server objs)
 	rpcPath := rpcPathPrefix + "-" + strconv.Itoa(port)
