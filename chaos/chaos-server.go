@@ -63,19 +63,17 @@ func startRPCServer(port int) {
 	}
 	lockMonitor := func() {
 		lastHeartBeat := uint64(0)
-		lastHeartBeatStamp := time.Now()
+		lastHeartBeatStamp := time.Now().UTC()
 		for {
 			time.Sleep(LockMaintenanceLoop)
 			currentHeartBeat := atomic.LoadUint64(&lockHeartBeat)
 			if currentHeartBeat > lastHeartBeat {
 				lastHeartBeat = currentHeartBeat
 				lastHeartBeatStamp = time.Now()
-			}
-			// Check whether not too much time has passed since last 'sign' of life
-			// from maintenance loop
-			if time.Since(lastHeartBeatStamp) > LockMaintenanceHealthThreshold {
-				// reset state to initiate new monitoring
-				atomic.StoreUint64(&lockHeartBeat, 0)
+			} else if time.Now().UTC().Sub(lastHeartBeatStamp) > LockMaintenanceHealthThreshold {
+				// Too much time has passed since last 'sign' of life from maintenance loop
+
+				atomic.StoreUint64(&lockHeartBeat, 0) // Reset state to initiate new monitoring
 				lastHeartBeat = uint64(0)
 				lastHeartBeatStamp = time.Now()
 
