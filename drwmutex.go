@@ -83,7 +83,11 @@ func (dm *DRWMutex) Lock() {
 	dm.lockBlocking(DRWMutexInfinite, isReadLock)
 }
 
-// GetLock tries to get a write lock on dm before the timeout occurs.
+// GetLock tries to get a write lock on dm before the timeout elapses.
+//
+// If the lock is already in use, the calling go routine
+// blocks until either the mutex becomes available and return success or
+// more time has passed than the timeout value and return false.
 func (dm *DRWMutex) GetLock(timeout time.Duration) (locked bool) {
 
 	isReadLock := false
@@ -92,7 +96,7 @@ func (dm *DRWMutex) GetLock(timeout time.Duration) (locked bool) {
 
 // RLock holds a read lock on dm.
 //
-// If one or more read lock are already in use, it will grant another lock.
+// If one or more read locks are already in use, it will grant another lock.
 // Otherwise the calling go routine blocks until the mutex is available.
 func (dm *DRWMutex) RLock() {
 
@@ -100,23 +104,28 @@ func (dm *DRWMutex) RLock() {
 	dm.lockBlocking(DRWMutexInfinite, isReadLock)
 }
 
-// GetRLock tries to get a read lock on dm before the timeout occurs.
+// GetRLock tries to get a read lock on dm before the timeout elapses.
+//
+// If one or more read locks are already in use, it will grant another lock.
+// Otherwise the calling go routine blocks until either the mutex becomes
+// available and return success or more time has passed than the timeout
+// value and return false.
 func (dm *DRWMutex) GetRLock(timeout time.Duration) (locked bool) {
 
 	isReadLock := true
 	return dm.lockBlocking(timeout, isReadLock)
 }
 
-// lockBlocking will acquire either a read or a write lock
+// lockBlocking will try to acquire either a read or a write lock
 //
-// The call will block until the lock is granted using a built-in
-// timing randomized back-off algorithm to try again until successful
-func (dm *DRWMutex) lockBlocking(timeout time.Duration, isReadLock bool) bool {
+// The function will loop using a built-in timing randomized back-off
+// algorithm until either the lock is acquired successfully or more
+// time has elapsed than the timeout value.
+func (dm *DRWMutex) lockBlocking(timeout time.Duration, isReadLock bool) (locked bool) {
 	doneCh, start := make(chan struct{}), time.Now().UTC()
 	defer close(doneCh)
 
-	// We timed out on the previous lock, incrementally wait
-	// for a longer back-off time and try again afterwards.
+	// Use incremental back-off algorithm for repeated attempts to acquire the lock
 	for range newRetryTimerSimple(doneCh) {
 		// Create temp array on stack.
 		locks := make([]string, dnodeCount)
@@ -142,7 +151,7 @@ func (dm *DRWMutex) lockBlocking(timeout time.Duration, isReadLock bool) bool {
 		if time.Now().UTC().Sub(start) >= timeout { // Are we past the timeout?
 			break
 		}
-		// We timed out on the previous lock, incrementally wait
+		// Failed to acquire the lock on this attempt, incrementally wait
 		// for a longer back-off time and try again afterwards.
 	}
 	return false
