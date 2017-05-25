@@ -41,7 +41,7 @@ func log(msg ...interface{}) {
 
 // DRWMutexAcquireTimeout - tolerance limit to wait for lock acquisition before.
 const DRWMutexAcquireTimeout = 1 * time.Second // 1 second.
-const DRWMutexInfinite = time.Duration(1<<63 - 1)
+const drwMutexInfinite = time.Duration(1<<63 - 1)
 
 // A DRWMutex is a distributed mutual exclusion lock.
 type DRWMutex struct {
@@ -80,7 +80,7 @@ func NewDRWMutex(name string) *DRWMutex {
 func (dm *DRWMutex) Lock() {
 
 	isReadLock := false
-	dm.lockBlocking(DRWMutexInfinite, isReadLock)
+	dm.lockBlocking(drwMutexInfinite, isReadLock)
 }
 
 // GetLock tries to get a write lock on dm before the timeout elapses.
@@ -101,7 +101,7 @@ func (dm *DRWMutex) GetLock(timeout time.Duration) (locked bool) {
 func (dm *DRWMutex) RLock() {
 
 	isReadLock := true
-	dm.lockBlocking(DRWMutexInfinite, isReadLock)
+	dm.lockBlocking(drwMutexInfinite, isReadLock)
 }
 
 // GetRLock tries to get a read lock on dm before the timeout elapses.
