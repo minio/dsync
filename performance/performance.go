@@ -51,9 +51,9 @@ var (
 	resources []string
 )
 
-func lockLoop(w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
+func lockLoop(ds *dsync.Dsync, w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
 	defer w.Done()
-	dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d-%d", *portFlag, nr))
+	dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d-%d", *portFlag, nr), ds)
 
 	delayMax := float64(0.0)
 	timeLast := time.Now()
@@ -115,7 +115,8 @@ func main() {
 		clnts = append(clnts, newClient(servers[i], resources[i]))
 	}
 
-	if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+	ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -147,7 +148,7 @@ func main() {
 	fmt.Println("Test starting...")
 
 	for i := 0; i < parallel; i++ {
-		go lockLoop(&wait, &timeStart, runs, &done, i, ch)
+		go lockLoop(ds, &wait, &timeStart, runs, &done, i, ch)
 	}
 	totalRuns := runs * parallel
 
