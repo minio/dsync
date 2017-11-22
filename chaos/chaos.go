@@ -45,7 +45,7 @@ const rpcPathPrefix = "/dsync"
 
 // testNotEnoughServersForQuorum verifies that when quorum cannot be achieved that locking will block.
 // Once another server comes up and quorum becomes possible, the lock will be granted
-func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
+func testNotEnoughServersForQuorum(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -66,7 +66,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 		servers = append(servers, launchTestServers(n/2, 1)...)
 	}()
 
-	dm := dsync.NewDRWMutex("test")
+	dm := dsync.NewDRWMutex("test", ds)
 
 	log.Println("Trying to acquire lock but too few servers active...")
 	dm.Lock()
@@ -107,14 +107,14 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup) {
 
 // testServerGoingDown tests that a lock is granted when all servers are up, after too
 // many servers die that a new lock will block and once servers are up again, the lock is granted.
-func testServerGoingDown(wg *sync.WaitGroup) {
+func testServerGoingDown(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
 	log.Println("")
 	log.Println("**STARTING** testServerGoingDown")
 
-	dm := dsync.NewDRWMutex("test")
+	dm := dsync.NewDRWMutex("test", ds)
 
 	dm.Lock()
 	log.Println("Acquired lock")
@@ -153,7 +153,7 @@ func testServerGoingDown(wg *sync.WaitGroup) {
 
 // testServerDownDuringLock verifies that if a server goes down while a lock is held, and comes back later
 // another lock on the same name is not granted too early
-func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
+func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -169,7 +169,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 	}
 	log.Println("Killed just enough servers to keep quorum")
 
-	dm := dsync.NewDRWMutex("test")
+	dm := dsync.NewDRWMutex("test", ds)
 
 	// acquire lock
 	dm.Lock()
@@ -196,7 +196,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 		dm.Unlock()
 	}()
 
-	dm2 := dsync.NewDRWMutex("test")
+	dm2 := dsync.NewDRWMutex("test", ds)
 
 	// try to acquire same lock -- only granted after first lock released
 	log.Println("Trying to acquire new lock on same resource...")
@@ -214,14 +214,14 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup) {
 // another lock on the same name is granted too early
 //
 // Specific deficiency: more than one lock is granted on the same (exclusive) resource
-func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
+func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
 	log.Println("")
 	log.Println("**STARTING** testMultipleServersOverQuorumDownDuringLockKnownError")
 
-	dm := dsync.NewDRWMutex("test")
+	dm := dsync.NewDRWMutex("test", ds)
 
 	// acquire lock
 	dm.Lock()
@@ -250,7 +250,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 		dm.Unlock()
 	}()
 
-	dm2 := dsync.NewDRWMutex("test")
+	dm2 := dsync.NewDRWMutex("test", ds)
 
 	// try to acquire same lock -- granted once killed servers are up again
 	log.Println("Trying to acquire new lock on same resource...")
@@ -266,7 +266,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup) {
 }
 
 // testSingleStaleLock verifies that, despite a single stale lock, a new lock can still be acquired on same resource
-func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
+func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -296,7 +296,7 @@ func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can be acquired despite single server having a stale lock
-	dm := dsync.NewDRWMutex(lockName)
+	dm := dsync.NewDRWMutex(lockName, ds)
 
 	ch := make(chan struct{})
 
@@ -336,7 +336,7 @@ func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 // testMultipleStaleLocks verifies that
 // (before maintenance) multiple stale locks will prevent a new lock from being granted
 // ( after maintenance) multiple stale locks not will prevent a new lock from being granted
-func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
+func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -365,7 +365,7 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can not be acquired due to too many servers having a stale lock
-	dm := dsync.NewDRWMutex(lockName)
+	dm := dsync.NewDRWMutex(lockName, ds)
 
 	ch := make(chan struct{})
 
@@ -404,7 +404,7 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool) {
 
 // testClientThatHasLockCrashes verifies that (after a lock maintenance loop)
 // multiple stale locks will not prevent a new lock on same resource
-func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
+func testClientThatHasLockCrashes(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -430,7 +430,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 	servers = append(servers, launchTestServers(len(servers), 1)...)
 	log.Println("Crashed server restarted")
 
-	dm := dsync.NewDRWMutex("test-stale")
+	dm := dsync.NewDRWMutex("test-stale", ds)
 
 	ch := make(chan struct{})
 
@@ -455,7 +455,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup) {
 }
 
 // Same as testClientThatHasLockCrashes but with two clients having read locks
-func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
+func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -483,7 +483,7 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup) {
 	servers = append(servers, launchTestServers(len(servers), 2)...)
 	log.Println("Crashed servers restarted")
 
-	dm := dsync.NewDRWMutex("test-stale")
+	dm := dsync.NewDRWMutex("test-stale", ds)
 
 	ch := make(chan struct{})
 
@@ -519,10 +519,10 @@ type DRWMutexNoWriterStarvation struct {
 	rw   *dsync.DRWMutex
 }
 
-func NewDRWMutexNoWriterStarvation(name string) *DRWMutexNoWriterStarvation {
+func NewDRWMutexNoWriterStarvation(name string, ds *dsync.Dsync) *DRWMutexNoWriterStarvation {
 	return &DRWMutexNoWriterStarvation{
-		excl: dsync.NewDRWMutex(name + "-excl-no-writer-starvation"),
-		rw:   dsync.NewDRWMutex(name),
+		excl: dsync.NewDRWMutex(name+"-excl-no-writer-starvation", ds),
+		rw:   dsync.NewDRWMutex(name, ds),
 	}
 }
 
@@ -550,7 +550,7 @@ func (d *DRWMutexNoWriterStarvation) RUnlock() {
 
 // testWriterStarvation tests that a separate implementation using a pair
 // of two DRWMutexes can prevent writer starvation (due to too many read locks)
-func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
+func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync.Dsync) {
 
 	defer wg.Done()
 
@@ -561,9 +561,9 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool) {
 
 	var m RWLocker
 	if noWriterStarvation {
-		m = NewDRWMutexNoWriterStarvation("test") // sync.RWMutex{} behaves identical
+		m = NewDRWMutexNoWriterStarvation("test", ds) // sync.RWMutex{} behaves identical
 	} else {
-		m = dsync.NewDRWMutex("test")
+		m = dsync.NewDRWMutex("test", ds)
 	}
 
 	m.RLock()
@@ -649,7 +649,8 @@ func main() {
 					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 				}
 
-				if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+				ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+				if err != nil {
 					log.Fatalf("set nodes failed with %v", err)
 				}
 
@@ -657,12 +658,12 @@ func main() {
 				time.Sleep(100 * time.Millisecond)
 
 				if *writeLockFlag != "" {
-					lock := dsync.NewDRWMutex(*writeLockFlag)
+					lock := dsync.NewDRWMutex(*writeLockFlag, ds)
 					lock.Lock()
 					log.Println("Acquired write lock:", *writeLockFlag, "(never to be released)")
 				}
 				if *readLockFlag != "" {
-					lock := dsync.NewDRWMutex(*readLockFlag)
+					lock := dsync.NewDRWMutex(*readLockFlag, ds)
 					lock.RLock()
 					log.Println("Acquired read lock:", *readLockFlag, "(never to be released)")
 				}
@@ -697,7 +698,8 @@ func main() {
 	}
 
 	// This process serves as the first server
-	if err := dsync.Init(clnts, getSelfNode(clnts, *portFlag)); err != nil {
+	ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
 
@@ -706,57 +708,57 @@ func main() {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go testNotEnoughServersForQuorum(&wg)
+	go testNotEnoughServersForQuorum(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
-	go testServerGoingDown(&wg)
+	go testServerGoingDown(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
-	testSingleServerOverQuorumDownDuringLock(&wg)
+	testSingleServerOverQuorumDownDuringLock(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
-	testMultipleServersOverQuorumDownDuringLockKnownError(&wg)
+	testMultipleServersOverQuorumDownDuringLockKnownError(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
-	testClientThatHasLockCrashes(&wg)
+	testClientThatHasLockCrashes(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
-	testTwoClientsThatHaveReadLocksCrash(&wg)
+	testTwoClientsThatHaveReadLocksCrash(&wg, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	beforeMaintenanceKicksIn := true
-	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	beforeMaintenanceKicksIn = false
-	testSingleStaleLock(&wg, beforeMaintenanceKicksIn)
+	testSingleStaleLock(&wg, beforeMaintenanceKicksIn, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	beforeMaintenanceKicksIn = true
-	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	beforeMaintenanceKicksIn = false
-	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn)
+	testMultipleStaleLocks(&wg, beforeMaintenanceKicksIn, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	noWriterStarvation := true
-	testWriterStarvation(&wg, noWriterStarvation)
+	testWriterStarvation(&wg, noWriterStarvation, ds)
 	wg.Wait()
 
 	wg.Add(1)
 	noWriterStarvation = false
-	testWriterStarvation(&wg, noWriterStarvation)
+	testWriterStarvation(&wg, noWriterStarvation, ds)
 	wg.Wait()
 
 	// Kill any launched processes

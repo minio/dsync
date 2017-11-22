@@ -34,13 +34,10 @@ import (
 	. "github.com/minio/dsync"
 )
 
-const RpcPath = "/dsync"
-const N = 4           // number of lock servers for tests.
-var nodes []string    // list of node IP addrs or hostname with ports.
+var ds *Dsync
 var rpcPaths []string // list of rpc paths where lock server is serving.
 
 func startRPCServers(nodes []string) {
-
 	for i := range nodes {
 		server := rpc.NewServer()
 		server.RegisterName("Dsync", &lockServer{
@@ -62,15 +59,17 @@ func startRPCServers(nodes []string) {
 
 // TestMain initializes the testing framework
 func TestMain(m *testing.M) {
+	const rpcPath = "/dsync"
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
+	var nodes []string // list of node IP addrs or hostname with ports.
 	nodes = make([]string, 4)
 	for i := range nodes {
 		nodes[i] = fmt.Sprintf("127.0.0.1:%d", i+12345)
 	}
 	for i := range nodes {
-		rpcPaths = append(rpcPaths, RpcPath+"-"+strconv.Itoa(i))
+		rpcPaths = append(rpcPaths, rpcPath+"-"+strconv.Itoa(i))
 	}
 
 	// Initialize net/rpc clients for dsync.
@@ -79,30 +78,29 @@ func TestMain(m *testing.M) {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
 
-	if err := Init(clnts, 5); err == nil {
+	if _, err := New(clnts, 5); err == nil {
 		log.Fatalf("Should have failed")
 	}
 
-	if err := Init(clnts[0:1], 0); err == nil {
+	if _, err := New(clnts[0:1], 0); err == nil {
 		log.Fatalf("Should have failed")
 	}
 
 	nclnts := make([]NetLocker, 17)
-	if err := Init(nclnts, 0); err == nil {
+	if _, err := New(nclnts, 0); err == nil {
 		log.Fatalf("Should have failed")
 	}
 
 	nclnts = make([]NetLocker, 15)
-	if err := Init(nclnts, 0); err == nil {
+	if _, err := New(nclnts, 0); err == nil {
 		log.Fatalf("Should have failed")
 	}
 
+	var err error
 	rpcOwnNodeFakeForTest := 0
-	if err := Init(clnts, rpcOwnNodeFakeForTest); err != nil {
+	ds, err = New(clnts, rpcOwnNodeFakeForTest)
+	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
-	}
-	if err := Init(clnts, rpcOwnNodeFakeForTest); err == nil {
-		log.Fatalf("Should have failed")
 	}
 	startRPCServers(nodes)
 
@@ -111,7 +109,7 @@ func TestMain(m *testing.M) {
 
 func TestSimpleLock(t *testing.T) {
 
-	dm := NewDRWMutex("test")
+	dm := NewDRWMutex("test", ds)
 
 	dm.Lock()
 
@@ -123,7 +121,7 @@ func TestSimpleLock(t *testing.T) {
 
 func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 
-	dm := NewDRWMutex("test")
+	dm := NewDRWMutex("test", ds)
 
 	dm.Lock()
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
@@ -149,8 +147,8 @@ func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 // Test two locks for same resource, one succeeds, one fails (after timeout)
 func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := NewDRWMutex("aap")
-	dm2nd := NewDRWMutex("aap")
+	dm1st := NewDRWMutex("aap", ds)
+	dm2nd := NewDRWMutex("aap", ds)
 
 	dm1st.Lock()
 
@@ -173,9 +171,9 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 // Test three locks for same resource, one succeeds, one fails (after timeout)
 func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 
-	dm1st := NewDRWMutex("aap")
-	dm2nd := NewDRWMutex("aap")
-	dm3rd := NewDRWMutex("aap")
+	dm1st := NewDRWMutex("aap", ds)
+	dm2nd := NewDRWMutex("aap", ds)
+	dm3rd := NewDRWMutex("aap", ds)
 
 	dm1st.Lock()
 
@@ -238,8 +236,8 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 // Test two locks for different resources, both succeed
 func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 
-	dm1 := NewDRWMutex("aap")
-	dm2 := NewDRWMutex("noot")
+	dm1 := NewDRWMutex("aap", ds)
+	dm2 := NewDRWMutex("noot", ds)
 
 	dm1.Lock()
 	dm2.Lock()
@@ -265,7 +263,7 @@ func HammerMutex(m *DRWMutex, loops int, cdone chan bool) {
 // Borrowed from mutex_test.go
 func TestMutex(t *testing.T) {
 	c := make(chan bool)
-	m := NewDRWMutex("test")
+	m := NewDRWMutex("test", ds)
 	for i := 0; i < 10; i++ {
 		go HammerMutex(m, 1000, c)
 	}
@@ -289,7 +287,7 @@ func BenchmarkMutexUncontended(b *testing.B) {
 }
 
 func benchmarkMutex(b *testing.B, slack, work bool) {
-	mu := NewDRWMutex("")
+	mu := NewDRWMutex("", ds)
 	if slack {
 		b.SetParallelism(10)
 	}
@@ -332,7 +330,7 @@ func BenchmarkMutexNoSpin(b *testing.B) {
 	// These goroutines yield during local work, so that switching from
 	// a blocked goroutine to other goroutines is profitable.
 	// As a matter of fact, this benchmark still triggers some spinning in the mutex.
-	m := NewDRWMutex("")
+	m := NewDRWMutex("", ds)
 	var acc0, acc1 uint64
 	b.SetParallelism(4)
 	b.RunParallel(func(pb *testing.PB) {
@@ -364,7 +362,7 @@ func BenchmarkMutexSpin(b *testing.B) {
 	// profitable. To achieve this we create a goroutine per-proc.
 	// These goroutines access considerable amount of local data so that
 	// unnecessary rescheduling is penalized by cache misses.
-	m := NewDRWMutex("")
+	m := NewDRWMutex("", ds)
 	var acc0, acc1 uint64
 	b.RunParallel(func(pb *testing.PB) {
 		var data [16 << 10]uint64

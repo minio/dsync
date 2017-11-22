@@ -38,12 +38,13 @@ func main() {
 	}
 
 	// Initialize dsync and treat 0th index on lockClients as self node.
-	if err := dsync.Init(lockClients, 0); err != nil {
+	ds, err := dsync.New(lockClients, 0)
+	if err != nil {
 		log.Fatal("Fail to initialize dsync.", err)
 	}
 
 	// Get new distributed RWMutex on resource "Music"
-	drwMutex := dsync.NewDRWMutex("Music")
+	drwMutex := dsync.NewDRWMutex("Music", ds)
 
 	// Lock "music" resource.
 	drwMutex.Lock()
