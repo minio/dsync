@@ -92,8 +92,8 @@ func TestMain(m *testing.M) {
 	}
 
 	nclnts = make([]NetLocker, 15)
-	if _, err := New(nclnts, 0); err == nil {
-		log.Fatalf("Should have failed")
+	if _, err := New(nclnts, 0); err != nil {
+		log.Fatalf("Should pass")
 	}
 
 	var err error
