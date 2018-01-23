@@ -78,30 +78,13 @@ func TestMain(m *testing.M) {
 		clnts = append(clnts, newClient(nodes[i], rpcPaths[i]))
 	}
 
-	if _, err := New(clnts, 5); err == nil {
-		log.Fatalf("Should have failed")
-	}
-
-	if _, err := New(clnts[0:1], 0); err == nil {
-		log.Fatalf("Should have failed")
-	}
-
-	nclnts := make([]NetLocker, 17)
-	if _, err := New(nclnts, 0); err == nil {
-		log.Fatalf("Should have failed")
-	}
-
-	nclnts = make([]NetLocker, 15)
-	if _, err := New(nclnts, 0); err == nil {
-		log.Fatalf("Should have failed")
-	}
-
 	var err error
 	rpcOwnNodeFakeForTest := 0
 	ds, err = New(clnts, rpcOwnNodeFakeForTest)
 	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
+
 	startRPCServers(nodes)
 
 	os.Exit(m.Run())
