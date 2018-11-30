@@ -26,6 +26,8 @@ import (
 	"net/rpc"
 	"os"
 	"os/signal"
+	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +53,20 @@ var (
 	resources []string
 )
 
+func getSource() string {
+	var funcName string
+	pc, filename, lineNum, ok := runtime.Caller(2)
+	if ok {
+		filename = path.Base(filename)
+		funcName = runtime.FuncForPC(pc).Name()
+	} else {
+		filename = "<unknown>"
+		lineNum = 0
+	}
+
+	return fmt.Sprintf("[%s:%d:%s()]", filename, lineNum, funcName)
+}
+
 func lockLoop(ds *dsync.Dsync, w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
 	defer w.Done()
 	dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d-%d", *portFlag, nr), ds)
@@ -59,7 +75,7 @@ func lockLoop(ds *dsync.Dsync, w *sync.WaitGroup, timeStart *time.Time, runs int
 	timeLast := time.Now()
 	var run int
 	for run = 1; !*done && run <= runs; run++ {
-		dm.Lock()
+		dm.Lock("test", getSource())
 
 		if run == 1 { // re-initialize timing info to account for initial delay to start all servers
 			*timeStart = time.Now()

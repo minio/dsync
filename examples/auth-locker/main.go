@@ -47,7 +47,7 @@ func main() {
 	drwMutex := dsync.NewDRWMutex("Music", ds)
 
 	// Lock "music" resource.
-	drwMutex.Lock()
+	drwMutex.Lock("Music", "main.go:50:main()")
 
 	// As we got writable lock on Music, do some crazy things.
 

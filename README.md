@@ -105,7 +105,7 @@ func lockSameResource() {
 	// Create distributed mutex to protect resource 'test'
 	dm := dsync.NewDRWMutex("test", ds)
 
-	dm.Lock()
+	dm.Lock("lock-1", "example.go:505:lockSameResource()")
 	log.Println("first lock granted")
 
 	// Release 1st lock after 5 seconds
@@ -117,7 +117,7 @@ func lockSameResource() {
 
 	// Try to acquire lock again, will block until initial lock is released
 	log.Println("about to lock same resource again...")
-	dm.Lock()
+	dm.Lock("lock-1", "example.go:515:lockSameResource()")
 	log.Println("second lock granted")
 
 	time.Sleep(2 * time.Second)
@@ -143,10 +143,10 @@ func twoReadLocksAndSingleWriteLock() {
 
 	drwm := dsync.NewDRWMutex("resource", ds)
 
-	drwm.RLock()
+	drwm.RLock("RLock-1", "example.go:416:twoReadLocksAndSingleWriteLock()")
 	log.Println("1st read lock acquired, waiting...")
 
-	drwm.RLock()
+	drwm.RLock("RLock-2", "example.go:420:twoReadLocksAndSingleWriteLock()")
 	log.Println("2nd read lock acquired, waiting...")
 
 	go func() {
@@ -162,7 +162,7 @@ func twoReadLocksAndSingleWriteLock() {
 	}()
 
 	log.Println("Trying to acquire write lock, waiting...")
-	drwm.Lock()
+	drwm.Lock("Lock-1", "example.go:445:twoReadLocksAndSingleWriteLock()")
 	log.Println("Write lock acquired, waiting...")
 
 	time.Sleep(3 * time.Second)

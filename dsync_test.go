@@ -94,7 +94,7 @@ func TestSimpleLock(t *testing.T) {
 
 	dm := NewDRWMutex("test", ds)
 
-	dm.Lock()
+	dm.Lock(id, source)
 
 	// fmt.Println("Lock acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
@@ -106,23 +106,23 @@ func TestSimpleLockUnlockMultipleTimes(t *testing.T) {
 
 	dm := NewDRWMutex("test", ds)
 
-	dm.Lock()
+	dm.Lock(id, source)
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
 	dm.Unlock()
 
-	dm.Lock()
+	dm.Lock(id, source)
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
 	dm.Unlock()
 
-	dm.Lock()
+	dm.Lock(id, source)
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
 	dm.Unlock()
 
-	dm.Lock()
+	dm.Lock(id, source)
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
 	dm.Unlock()
 
-	dm.Lock()
+	dm.Lock(id, source)
 	time.Sleep(time.Duration(10+(rand.Float32()*50)) * time.Millisecond)
 	dm.Unlock()
 }
@@ -133,7 +133,7 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 	dm1st := NewDRWMutex("aap", ds)
 	dm2nd := NewDRWMutex("aap", ds)
 
-	dm1st.Lock()
+	dm1st.Lock(id, source)
 
 	// Release lock after 10 seconds
 	go func() {
@@ -143,7 +143,7 @@ func TestTwoSimultaneousLocksForSameResource(t *testing.T) {
 		dm1st.Unlock()
 	}()
 
-	dm2nd.Lock()
+	dm2nd.Lock(id, source)
 
 	// fmt.Printf("2nd lock obtained after 1st lock is released\n")
 	time.Sleep(2500 * time.Millisecond)
@@ -158,7 +158,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	dm2nd := NewDRWMutex("aap", ds)
 	dm3rd := NewDRWMutex("aap", ds)
 
-	dm1st.Lock()
+	dm1st.Lock(id, source)
 
 	// Release lock after 10 seconds
 	go func() {
@@ -174,7 +174,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		dm2nd.Lock()
+		dm2nd.Lock(id, source)
 
 		// Release lock after 10 seconds
 		go func() {
@@ -184,7 +184,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 			dm2nd.Unlock()
 		}()
 
-		dm3rd.Lock()
+		dm3rd.Lock(id, source)
 
 		// fmt.Printf("3rd lock obtained after 1st & 2nd locks are released\n")
 		time.Sleep(2500 * time.Millisecond)
@@ -195,7 +195,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		dm3rd.Lock()
+		dm3rd.Lock(id, source)
 
 		// Release lock after 10 seconds
 		go func() {
@@ -205,7 +205,7 @@ func TestThreeSimultaneousLocksForSameResource(t *testing.T) {
 			dm3rd.Unlock()
 		}()
 
-		dm2nd.Lock()
+		dm2nd.Lock(id, source)
 
 		// fmt.Printf("2nd lock obtained after 1st & 3rd locks are released\n")
 		time.Sleep(2500 * time.Millisecond)
@@ -222,8 +222,8 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 	dm1 := NewDRWMutex("aap", ds)
 	dm2 := NewDRWMutex("noot", ds)
 
-	dm1.Lock()
-	dm2.Lock()
+	dm1.Lock(id, source)
+	dm2.Lock(id, source)
 
 	// fmt.Println("Both locks acquired, waiting...")
 	time.Sleep(2500 * time.Millisecond)
@@ -237,7 +237,7 @@ func TestTwoSimultaneousLocksForDifferentResources(t *testing.T) {
 // Borrowed from mutex_test.go
 func HammerMutex(m *DRWMutex, loops int, cdone chan bool) {
 	for i := 0; i < loops; i++ {
-		m.Lock()
+		m.Lock(id, source)
 		m.Unlock()
 	}
 	cdone <- true
@@ -263,7 +263,7 @@ func BenchmarkMutexUncontended(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var mu PaddedMutex
 		for pb.Next() {
-			mu.Lock()
+			mu.Lock(id, source)
 			mu.Unlock()
 		}
 	})
@@ -277,7 +277,7 @@ func benchmarkMutex(b *testing.B, slack, work bool) {
 	b.RunParallel(func(pb *testing.PB) {
 		foo := 0
 		for pb.Next() {
-			mu.Lock()
+			mu.Lock(id, source)
 			mu.Unlock()
 			if work {
 				for i := 0; i < 100; i++ {
@@ -321,7 +321,7 @@ func BenchmarkMutexNoSpin(b *testing.B) {
 		var data [4 << 10]uint64
 		for i := 0; pb.Next(); i++ {
 			if i%4 == 0 {
-				m.Lock()
+				m.Lock(id, source)
 				acc0 -= 100
 				acc1 += 100
 				m.Unlock()
@@ -350,7 +350,7 @@ func BenchmarkMutexSpin(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var data [16 << 10]uint64
 		for i := 0; pb.Next(); i++ {
-			m.Lock()
+			m.Lock(id, source)
 			acc0 -= 100
 			acc1 += 100
 			m.Unlock()

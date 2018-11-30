@@ -8,8 +8,7 @@ env:
 - ARCH=x86_64
 
 go:
-- 1.8.x
-- 1.9.x
+- 1.11.4
 
 script:
 - diff -au <(gofmt -d .) <(printf "")
