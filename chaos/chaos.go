@@ -23,6 +23,8 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +44,20 @@ const chaosName = "chaos"
 const n = 4
 const portStart = 12345
 const rpcPathPrefix = "/dsync"
+
+func getSource() string {
+	var funcName string
+	pc, filename, lineNum, ok := runtime.Caller(2)
+	if ok {
+		filename = path.Base(filename)
+		funcName = runtime.FuncForPC(pc).Name()
+	} else {
+		filename = "<unknown>"
+		lineNum = 0
+	}
+
+	return fmt.Sprintf("[%s:%d:%s()]", filename, lineNum, funcName)
+}
 
 // testNotEnoughServersForQuorum verifies that when quorum cannot be achieved that locking will block.
 // Once another server comes up and quorum becomes possible, the lock will be granted
@@ -69,7 +85,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	dm := dsync.NewDRWMutex("test", ds)
 
 	log.Println("Trying to acquire lock but too few servers active...")
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock")
 
 	time.Sleep(2 * time.Second)
@@ -91,7 +107,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	}()
 
 	log.Println("Trying to acquire lock again but too few servers active...")
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock again")
 
 	dm.Unlock()
@@ -116,7 +132,7 @@ func testServerGoingDown(wg *sync.WaitGroup, ds *dsync.Dsync) {
 
 	dm := dsync.NewDRWMutex("test", ds)
 
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock")
 
 	time.Sleep(100 * time.Millisecond)
@@ -142,7 +158,7 @@ func testServerGoingDown(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	}()
 
 	log.Println("Trying to acquire lock...")
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock again")
 
 	dm.Unlock()
@@ -172,7 +188,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup, ds *dsync.Dsyn
 	dm := dsync.NewDRWMutex("test", ds)
 
 	// acquire lock
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock")
 
 	// kill one server which will lose one active lock
@@ -200,7 +216,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup, ds *dsync.Dsyn
 
 	// try to acquire same lock -- only granted after first lock released
 	log.Println("Trying to acquire new lock on same resource...")
-	dm2.Lock()
+	dm2.Lock("test", getSource())
 	log.Println("New lock granted")
 
 	// release lock
@@ -224,7 +240,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup, d
 	dm := dsync.NewDRWMutex("test", ds)
 
 	// acquire lock
-	dm.Lock()
+	dm.Lock("test", getSource())
 	log.Println("Acquired lock")
 
 	// kill enough servers to free up enough servers to allow new quorum once restarted
@@ -254,7 +270,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup, d
 
 	// try to acquire same lock -- granted once killed servers are up again
 	log.Println("Trying to acquire new lock on same resource...")
-	dm2.Lock()
+	dm2.Lock("test", getSource())
 	log.Println("New lock granted (too soon)")
 
 	time.Sleep(6 * time.Second)
@@ -303,7 +319,7 @@ func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, ds *
 	// try to acquire lock in separate routine (will not succeed)
 	go func() {
 		log.Println("Trying to get the lock")
-		dm.Lock()
+		dm.Lock("test", getSource())
 		ch <- struct{}{}
 	}()
 
@@ -372,7 +388,7 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, d
 	// try to acquire lock in separate routine (will not succeed)
 	go func() {
 		log.Println("Trying to get the lock")
-		dm.Lock()
+		dm.Lock("test", getSource())
 		ch <- struct{}{}
 	}()
 
@@ -437,7 +453,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	// try to acquire lock in separate routine (will not succeed)
 	go func() {
 		log.Println("Trying to get the lock again")
-		dm.Lock()
+		dm.Lock("test", getSource())
 		ch <- struct{}{}
 	}()
 
@@ -490,7 +506,7 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	// try to acquire lock in separate routine (will not succeed)
 	go func() {
 		log.Println("Trying to get the lock again")
-		dm.Lock()
+		dm.Lock("test", getSource())
 		ch <- struct{}{}
 	}()
 
@@ -508,8 +524,8 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup, ds *dsync.Dsync) {
 }
 
 type RWLocker interface {
-	Lock()
-	RLock()
+	Lock(id, source string)
+	RLock(id, source string)
 	Unlock()
 	RUnlock()
 }
@@ -526,22 +542,22 @@ func NewDRWMutexNoWriterStarvation(name string, ds *dsync.Dsync) *DRWMutexNoWrit
 	}
 }
 
-func (d *DRWMutexNoWriterStarvation) Lock() {
-	d.excl.Lock()
+func (d *DRWMutexNoWriterStarvation) Lock(id, source string) {
+	d.excl.Lock(id+"-excl-no-writer-starvation", source)
 	defer d.excl.Unlock()
 
-	d.rw.Lock()
+	d.rw.Lock(id, source)
 }
 
 func (d *DRWMutexNoWriterStarvation) Unlock() {
 	d.rw.Unlock()
 }
 
-func (d *DRWMutexNoWriterStarvation) RLock() {
-	d.excl.Lock()
+func (d *DRWMutexNoWriterStarvation) RLock(id, source string) {
+	d.excl.Lock(id+"-excl-no-writer-starvation", source)
 	defer d.excl.Unlock()
 
-	d.rw.RLock()
+	d.rw.RLock(id, source)
 }
 
 func (d *DRWMutexNoWriterStarvation) RUnlock() {
@@ -566,7 +582,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 		m = dsync.NewDRWMutex("test", ds)
 	}
 
-	m.RLock()
+	m.RLock("test", getSource())
 	log.Println("Acquired (1st) read lock")
 
 	wgReadLocks := sync.WaitGroup{}
@@ -584,7 +600,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 		defer wgReadLocks.Done()
 		time.Sleep(10 * time.Millisecond)
 		log.Println("About to acquire (second) read lock")
-		m.RLock()
+		m.RLock("RLock", getSource())
 		log.Println("Acquired (2nd) read lock")
 		time.Sleep(2 * time.Second)
 		m.RUnlock()
@@ -592,7 +608,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 	}()
 
 	log.Println("About to acquire write lock")
-	m.Lock()
+	m.Lock("Lock", getSource())
 	log.Println("Acquired write lock")
 	time.Sleep(2 * time.Second)
 	m.Unlock()
@@ -659,12 +675,12 @@ func main() {
 
 				if *writeLockFlag != "" {
 					lock := dsync.NewDRWMutex(*writeLockFlag, ds)
-					lock.Lock()
+					lock.Lock(*writeLockFlag, getSource())
 					log.Println("Acquired write lock:", *writeLockFlag, "(never to be released)")
 				}
 				if *readLockFlag != "" {
 					lock := dsync.NewDRWMutex(*readLockFlag, ds)
-					lock.RLock()
+					lock.RLock(*readLockFlag, getSource())
 					log.Println("Acquired read lock:", *readLockFlag, "(never to be released)")
 				}
 

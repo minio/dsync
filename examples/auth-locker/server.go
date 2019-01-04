@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"path"
 	"strconv"
 	"sync"
 )
@@ -38,7 +39,7 @@ func StartLockServer(port int) {
 
 	rpcServer := rpc.NewServer()
 	rpcServer.RegisterName("LockServer", lockServer)
-	rpcServer.HandleHTTP(rpcPath, rpcPath)
+	rpcServer.HandleHTTP(rpcPath, path.Join(rpcPath, "_authlocker"))
 
 	listener, err := net.Listen("tcp", ":"+portString)
 	if err == nil {
