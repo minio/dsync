@@ -138,7 +138,7 @@ which gives the following output:
 
 DRWMutex also supports multiple simultaneous read locks as shown below (analogous to `sync.RWMutex`)
 
-```
+```go
 func twoReadLocksAndSingleWriteLock() {
 
 	drwm := dsync.NewDRWMutex("resource", ds)
@@ -260,7 +260,7 @@ Server side logic
 
 On the server side just the following logic needs to be added (barring some extra error checking):
 
-```
+```go
 const WriteLock = -1
 
 type lockServer struct {
@@ -296,7 +296,7 @@ func (l *lockServer) Unlock(args *LockArgs, reply *bool) error {
 
 If you also want RLock()/RUnlock() functionality, then add this as well:
 
-```
+```go
 const ReadLock = 1
 
 func (l *lockServer) RLock(args *LockArgs, reply *bool) error {
