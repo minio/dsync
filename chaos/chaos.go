@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -82,7 +83,7 @@ func testNotEnoughServersForQuorum(wg *sync.WaitGroup, ds *dsync.Dsync) {
 		servers = append(servers, launchTestServers(n/2, 1)...)
 	}()
 
-	dm := dsync.NewDRWMutex("test", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	log.Println("Trying to acquire lock but too few servers active...")
 	dm.Lock("test", getSource())
@@ -130,7 +131,7 @@ func testServerGoingDown(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	log.Println("")
 	log.Println("**STARTING** testServerGoingDown")
 
-	dm := dsync.NewDRWMutex("test", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	dm.Lock("test", getSource())
 	log.Println("Acquired lock")
@@ -185,7 +186,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup, ds *dsync.Dsyn
 	}
 	log.Println("Killed just enough servers to keep quorum")
 
-	dm := dsync.NewDRWMutex("test", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	// acquire lock
 	dm.Lock("test", getSource())
@@ -212,7 +213,7 @@ func testSingleServerOverQuorumDownDuringLock(wg *sync.WaitGroup, ds *dsync.Dsyn
 		dm.Unlock()
 	}()
 
-	dm2 := dsync.NewDRWMutex("test", ds)
+	dm2 := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	// try to acquire same lock -- only granted after first lock released
 	log.Println("Trying to acquire new lock on same resource...")
@@ -237,7 +238,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup, d
 	log.Println("")
 	log.Println("**STARTING** testMultipleServersOverQuorumDownDuringLockKnownError")
 
-	dm := dsync.NewDRWMutex("test", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	// acquire lock
 	dm.Lock("test", getSource())
@@ -266,7 +267,7 @@ func testMultipleServersOverQuorumDownDuringLockKnownError(wg *sync.WaitGroup, d
 		dm.Unlock()
 	}()
 
-	dm2 := dsync.NewDRWMutex("test", ds)
+	dm2 := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	// try to acquire same lock -- granted once killed servers are up again
 	log.Println("Trying to acquire new lock on same resource...")
@@ -312,7 +313,7 @@ func testSingleStaleLock(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, ds *
 	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can be acquired despite single server having a stale lock
-	dm := dsync.NewDRWMutex(lockName, ds)
+	dm := dsync.NewDRWMutex(context.Background(), lockName, ds)
 
 	ch := make(chan struct{})
 
@@ -381,7 +382,7 @@ func testMultipleStaleLocks(wg *sync.WaitGroup, beforeMaintenanceKicksIn bool, d
 	time.Sleep(500 * time.Millisecond)
 
 	// lock on same resource can not be acquired due to too many servers having a stale lock
-	dm := dsync.NewDRWMutex(lockName, ds)
+	dm := dsync.NewDRWMutex(context.Background(), lockName, ds)
 
 	ch := make(chan struct{})
 
@@ -446,7 +447,7 @@ func testClientThatHasLockCrashes(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	servers = append(servers, launchTestServers(len(servers), 1)...)
 	log.Println("Crashed server restarted")
 
-	dm := dsync.NewDRWMutex("test-stale", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test-stale", ds)
 
 	ch := make(chan struct{})
 
@@ -499,7 +500,7 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	servers = append(servers, launchTestServers(len(servers), 2)...)
 	log.Println("Crashed servers restarted")
 
-	dm := dsync.NewDRWMutex("test-stale", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test-stale", ds)
 
 	ch := make(chan struct{})
 
@@ -537,8 +538,8 @@ type DRWMutexNoWriterStarvation struct {
 
 func NewDRWMutexNoWriterStarvation(name string, ds *dsync.Dsync) *DRWMutexNoWriterStarvation {
 	return &DRWMutexNoWriterStarvation{
-		excl: dsync.NewDRWMutex(name+"-excl-no-writer-starvation", ds),
-		rw:   dsync.NewDRWMutex(name, ds),
+		excl: dsync.NewDRWMutex(context.Background(), name+"-excl-no-writer-starvation", ds),
+		rw:   dsync.NewDRWMutex(context.Background(), name, ds),
 	}
 }
 
@@ -579,7 +580,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 	if noWriterStarvation {
 		m = NewDRWMutexNoWriterStarvation("test", ds) // sync.RWMutex{} behaves identical
 	} else {
-		m = dsync.NewDRWMutex("test", ds)
+		m = dsync.NewDRWMutex(context.Background(), "test", ds)
 	}
 
 	m.RLock("test", getSource())
@@ -674,12 +675,12 @@ func main() {
 				time.Sleep(100 * time.Millisecond)
 
 				if *writeLockFlag != "" {
-					lock := dsync.NewDRWMutex(*writeLockFlag, ds)
+					lock := dsync.NewDRWMutex(context.Background(), *writeLockFlag, ds)
 					lock.Lock(*writeLockFlag, getSource())
 					log.Println("Acquired write lock:", *writeLockFlag, "(never to be released)")
 				}
 				if *readLockFlag != "" {
-					lock := dsync.NewDRWMutex(*readLockFlag, ds)
+					lock := dsync.NewDRWMutex(context.Background(), *readLockFlag, ds)
 					lock.RLock(*readLockFlag, getSource())
 					log.Println("Acquired read lock:", *readLockFlag, "(never to be released)")
 				}

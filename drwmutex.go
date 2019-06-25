@@ -17,6 +17,7 @@
 package dsync
 
 import (
+	"context"
 	"fmt"
 	golog "log"
 	"math/rand"
@@ -53,6 +54,7 @@ type DRWMutex struct {
 	readersLocks [][]string // Array of array of nodes that granted reader locks
 	m            sync.Mutex // Mutex to prevent multiple simultaneous locks from this node
 	clnt         *Dsync
+	ctx          context.Context
 }
 
 // Granted - represents a structure of a granted lock.
@@ -70,11 +72,12 @@ func isLocked(uid string) bool {
 }
 
 // NewDRWMutex - initializes a new dsync RW mutex.
-func NewDRWMutex(name string, clnt *Dsync) *DRWMutex {
+func NewDRWMutex(ctx context.Context, name string, clnt *Dsync) *DRWMutex {
 	return &DRWMutex{
 		Name:       name,
 		writeLocks: make([]string, clnt.dNodeCount),
 		clnt:       clnt,
+		ctx:        ctx,
 	}
 }
 
@@ -127,11 +130,10 @@ func (dm *DRWMutex) GetRLock(id, source string, timeout time.Duration) (locked b
 // algorithm until either the lock is acquired successfully or more
 // time has elapsed than the timeout value.
 func (dm *DRWMutex) lockBlocking(timeout time.Duration, id, source string, isReadLock bool) (locked bool) {
-	doneCh, start := make(chan struct{}), time.Now().UTC()
-	defer close(doneCh)
+	start := time.Now().UTC()
 
 	// Use incremental back-off algorithm for repeated attempts to acquire the lock
-	for range newRetryTimerSimple(doneCh) {
+	for range newRetryTimerSimple(dm.ctx.Done()) {
 		// Create temp array on stack.
 		locks := make([]string, dm.clnt.dNodeCount)
 
