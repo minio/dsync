@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"strconv"
 
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	// Get new distributed RWMutex on resource "Music"
-	drwMutex := dsync.NewDRWMutex("Music", ds)
+	drwMutex := dsync.NewDRWMutex(context.Background(), "Music", ds)
 
 	// Lock "music" resource.
 	drwMutex.Lock("Music", "main.go:50:main()")

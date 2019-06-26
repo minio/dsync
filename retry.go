@@ -61,7 +61,7 @@ var globalRandomSource = rand.New(&lockedRandSource{
 // until the maximum retry attempts are reached. - this function is a fully
 // configurable version, meant for only advanced use cases. For the most part
 // one should use newRetryTimerSimple and newRetryTimer.
-func newRetryTimerWithJitter(unit time.Duration, cap time.Duration, jitter float64, doneCh chan struct{}) <-chan int {
+func newRetryTimerWithJitter(unit time.Duration, cap time.Duration, jitter float64, doneCh <-chan struct{}) <-chan int {
 	attemptCh := make(chan int)
 
 	// normalize jitter to the range [0, 1.0]
@@ -130,13 +130,13 @@ const (
 // newRetryTimer creates a timer with exponentially increasing delays
 // until the maximum retry attempts are reached. - this function provides
 // resulting retry values to be of maximum jitter.
-func newRetryTimer(unit time.Duration, cap time.Duration, doneCh chan struct{}) <-chan int {
+func newRetryTimer(unit time.Duration, cap time.Duration, doneCh <-chan struct{}) <-chan int {
 	return newRetryTimerWithJitter(unit, cap, MaxJitter, doneCh)
 }
 
 // newRetryTimerSimple creates a timer with exponentially increasing delays
 // until the maximum retry attempts are reached. - this function is a
 // simpler version with all default values.
-func newRetryTimerSimple(doneCh chan struct{}) <-chan int {
+func newRetryTimerSimple(doneCh <-chan struct{}) <-chan int {
 	return newRetryTimerWithJitter(defaultRetryUnit, defaultRetryCap, MaxJitter, doneCh)
 }

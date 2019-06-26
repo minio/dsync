@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -69,7 +70,7 @@ func getSource() string {
 
 func lockLoop(ds *dsync.Dsync, w *sync.WaitGroup, timeStart *time.Time, runs int, done *bool, nr int, ch chan<- float64) {
 	defer w.Done()
-	dm := dsync.NewDRWMutex(fmt.Sprintf("chaos-%d-%d", *portFlag, nr), ds)
+	dm := dsync.NewDRWMutex(context.Background(), fmt.Sprintf("chaos-%d-%d", *portFlag, nr), ds)
 
 	delayMax := float64(0.0)
 	timeLast := time.Now()
