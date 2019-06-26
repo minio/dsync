@@ -97,13 +97,13 @@ Here is a simple example showing how to protect a single resource (drop-in repla
 
 ```go
 import (
-	"github.com/minio/dsync"
+	"github.com/minio/dsync/v2"
 )
 
 func lockSameResource() {
 
 	// Create distributed mutex to protect resource 'test'
-	dm := dsync.NewDRWMutex("test", ds)
+	dm := dsync.NewDRWMutex(context.Background(), "test", ds)
 
 	dm.Lock("lock-1", "example.go:505:lockSameResource()")
 	log.Println("first lock granted")
@@ -141,7 +141,7 @@ DRWMutex also supports multiple simultaneous read locks as shown below (analogou
 ```go
 func twoReadLocksAndSingleWriteLock() {
 
-	drwm := dsync.NewDRWMutex("resource", ds)
+	drwm := dsync.NewDRWMutex(context.Background(), "resource", ds)
 
 	drwm.RLock("RLock-1", "example.go:416:twoReadLocksAndSingleWriteLock()")
 	log.Println("1st read lock acquired, waiting...")

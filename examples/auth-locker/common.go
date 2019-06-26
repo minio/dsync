@@ -16,7 +16,7 @@
 
 package main
 
-import "github.com/minio/dsync"
+import "github.com/minio/dsync/v2"
 
 const serviceEndpointPrefix = "/lockserver-"
 

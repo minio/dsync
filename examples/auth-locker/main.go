@@ -21,7 +21,7 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/minio/dsync"
+	"github.com/minio/dsync/v2"
 )
 
 const basePort = 50001

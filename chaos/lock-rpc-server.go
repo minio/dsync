@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/dsync"
+	"github.com/minio/dsync/v2"
 )
 
 type lockRequesterInfo struct {
