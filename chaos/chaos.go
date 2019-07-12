@@ -524,6 +524,7 @@ func testTwoClientsThatHaveReadLocksCrash(wg *sync.WaitGroup, ds *dsync.Dsync) {
 	log.Println("**PASSED** testTwoClientsThatHaveReadLocksCrash")
 }
 
+// RWLocker Interface
 type RWLocker interface {
 	Lock(id, source string)
 	RLock(id, source string)
@@ -531,11 +532,13 @@ type RWLocker interface {
 	RUnlock()
 }
 
+// DRWMutexNoWriterStarvation Struct
 type DRWMutexNoWriterStarvation struct {
 	excl *dsync.DRWMutex
 	rw   *dsync.DRWMutex
 }
 
+// NewDRWMutexNoWriterStarvation function
 func NewDRWMutexNoWriterStarvation(name string, ds *dsync.Dsync) *DRWMutexNoWriterStarvation {
 	return &DRWMutexNoWriterStarvation{
 		excl: dsync.NewDRWMutex(context.Background(), name+"-excl-no-writer-starvation", ds),
@@ -543,6 +546,7 @@ func NewDRWMutexNoWriterStarvation(name string, ds *dsync.Dsync) *DRWMutexNoWrit
 	}
 }
 
+// Lock function
 func (d *DRWMutexNoWriterStarvation) Lock(id, source string) {
 	d.excl.Lock(id+"-excl-no-writer-starvation", source)
 	defer d.excl.Unlock()
@@ -550,10 +554,12 @@ func (d *DRWMutexNoWriterStarvation) Lock(id, source string) {
 	d.rw.Lock(id, source)
 }
 
+// Unlock function
 func (d *DRWMutexNoWriterStarvation) Unlock() {
 	d.rw.Unlock()
 }
 
+// RLock function
 func (d *DRWMutexNoWriterStarvation) RLock(id, source string) {
 	d.excl.Lock(id+"-excl-no-writer-starvation", source)
 	defer d.excl.Unlock()
@@ -561,6 +567,7 @@ func (d *DRWMutexNoWriterStarvation) RLock(id, source string) {
 	d.rw.RLock(id, source)
 }
 
+// RUnlock function
 func (d *DRWMutexNoWriterStarvation) RUnlock() {
 	d.rw.RUnlock()
 }
@@ -634,6 +641,7 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 	}
 }
 
+// getSelfNode function
 func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
 
 	index := -1

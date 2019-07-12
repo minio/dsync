@@ -81,35 +81,42 @@ func (rpcClient *ReconnectRPCClient) Call(serviceMethod string, args interface{}
 	return err
 }
 
+// RLock function
 func (rpcClient *ReconnectRPCClient) RLock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.RLock", &args, &status)
 	return status, err
 }
 
+// Lock function
 func (rpcClient *ReconnectRPCClient) Lock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.Lock", &args, &status)
 	return status, err
 }
 
+// RUnlock function
 func (rpcClient *ReconnectRPCClient) RUnlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.RUnlock", &args, &status)
 	return status, err
 }
 
+// Unlock function
 func (rpcClient *ReconnectRPCClient) Unlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.Unlock", &args, &status)
 	return status, err
 }
 
+// ForceUnlock function
 func (rpcClient *ReconnectRPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
 	err = rpcClient.Call("Dsync.ForceUnlock", &args, &status)
 	return status, err
 }
 
+// ServerAddr function
 func (rpcClient *ReconnectRPCClient) ServerAddr() string {
 	return rpcClient.addr
 }
 
+// ServiceEndpoint function 
 func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
 	return rpcClient.endpoint
 }
