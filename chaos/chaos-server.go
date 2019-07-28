@@ -35,7 +35,7 @@ import (
 // const LockCheckValidityInterval = 2 * time.Minute
 //
 
-// LockMaintenanceLoop is the locking time for maintenace loop
+// LockMaintenanceLoop is the locking time for maintenance loop
 const LockMaintenanceLoop = 1 * time.Second
 
 // LockCheckValidityInterval is the time to check validity interval 
