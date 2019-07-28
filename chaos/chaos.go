@@ -641,7 +641,6 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 	}
 }
 
-// getSelfNode function
 func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
 
 	index := -1
