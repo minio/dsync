@@ -30,7 +30,6 @@ import (
 	"path"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -132,7 +131,7 @@ func main() {
 		clnts = append(clnts, newClient(servers[i], resources[i]))
 	}
 
-	ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+	ds, err := dsync.New(clnts)
 	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}
@@ -189,20 +188,4 @@ func main() {
 		fmt.Println("Waiting for test to close...")
 		time.Sleep(10000 * time.Millisecond)
 	}
-}
-
-func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
-
-	index := -1
-	for i, c := range rpcClnts {
-		p, _ := strconv.Atoi(strings.Split(c.ServerAddr(), ":")[1])
-		if port == p {
-			if index == -1 {
-				index = i
-			} else {
-				panic("More than one port found")
-			}
-		}
-	}
-	return index
 }

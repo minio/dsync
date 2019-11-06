@@ -19,7 +19,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -47,14 +46,6 @@ func startRPCServer(port int) {
 		lockMap: make(map[string][]lockRequesterInfo),
 		// timestamp: leave uninitialized for testing (set to real timestamp for actual usage)
 	}
-	go func() {
-		// Start with random sleep time, so as to avoid "synchronous checks" between servers
-		time.Sleep(time.Duration(rand.Float64() * float64(LockMaintenanceLoop)))
-		for {
-			time.Sleep(LockMaintenanceLoop)
-			locker.lockMaintenance(LockCheckValidityInterval)
-		}
-	}()
 	server.RegisterName("Dsync", locker)
 	// For some reason the registration paths need to be different (even for different server objs)
 	rpcPath := rpcPathPrefix + "-" + strconv.Itoa(port)

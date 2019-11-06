@@ -1,3 +1,3 @@
-module github.com/minio/dsync/v2
+module github.com/minio/dsync/v3
 
 go 1.12

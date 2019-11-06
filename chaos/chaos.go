@@ -634,22 +634,6 @@ func testWriterStarvation(wg *sync.WaitGroup, noWriterStarvation bool, ds *dsync
 	}
 }
 
-func getSelfNode(rpcClnts []dsync.NetLocker, port int) int {
-
-	index := -1
-	for i, c := range rpcClnts {
-		p, _ := strconv.Atoi(strings.Split(c.ServerAddr(), ":")[1])
-		if port == p {
-			if index == -1 {
-				index = i
-			} else {
-				panic("More than one port found")
-			}
-		}
-	}
-	return index
-}
-
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -666,7 +650,7 @@ func main() {
 					clnts = append(clnts, newClient(fmt.Sprintf("127.0.0.1:%d", portStart+i), rpcPathPrefix+"-"+strconv.Itoa(portStart+i)))
 				}
 
-				ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+				ds, err := dsync.New(clnts)
 				if err != nil {
 					log.Fatalf("set nodes failed with %v", err)
 				}
@@ -715,7 +699,7 @@ func main() {
 	}
 
 	// This process serves as the first server
-	ds, err := dsync.New(clnts, getSelfNode(clnts, *portFlag))
+	ds, err := dsync.New(clnts)
 	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}

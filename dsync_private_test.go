@@ -22,28 +22,18 @@ import "testing"
 
 // Tests dsync.New
 func TestNew(t *testing.T) {
-	nclnts := make([]NetLocker, 4)
-	if _, err := New(nclnts, 5); err == nil {
-		t.Fatalf("Should have failed")
-	}
-
-	nclnts = make([]NetLocker, 17)
-	if _, err := New(nclnts, 0); err != nil {
-		t.Fatal("Should pass", err)
-	}
-
-	nclnts = make([]NetLocker, 33)
-	if _, err := New(nclnts, 0); err == nil {
+	nclnts := make([]NetLocker, 33)
+	if _, err := New(nclnts); err == nil {
 		t.Fatal("Should have failed")
 	}
 
 	nclnts = make([]NetLocker, 1)
-	if _, err := New(nclnts, 0); err == nil {
+	if _, err := New(nclnts); err == nil {
 		t.Fatal("Should have failed")
 	}
 
 	nclnts = make([]NetLocker, 2)
-	nds, err := New(nclnts, 0)
+	nds, err := New(nclnts)
 	if err != nil {
 		t.Fatal("Should pass", err)
 	}
@@ -57,7 +47,7 @@ func TestNew(t *testing.T) {
 	}
 
 	nclnts = make([]NetLocker, 3)
-	nds, err = New(nclnts, 3)
+	nds, err = New(nclnts)
 	if err != nil {
 		t.Fatal("Should pass", err)
 	}

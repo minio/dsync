@@ -53,8 +53,6 @@ func (l *lockServer) Lock(args *dsync.LockArgs, reply *bool) error {
 		l.lockMap[args.Resource] = []lockRequesterInfo{
 			{
 				writer:        true,
-				serverAddr:    args.ServerAddr,
-				rpcPath:       args.ServiceEndpoint,
 				uid:           args.UID,
 				timestamp:     time.Now().UTC(),
 				timeLastCheck: time.Now().UTC(),
@@ -88,8 +86,6 @@ func (l *lockServer) RLock(args *dsync.LockArgs, reply *bool) error {
 	defer l.mutex.Unlock()
 	lrInfo := lockRequesterInfo{
 		writer:        false,
-		serverAddr:    args.ServerAddr,
-		rpcPath:       args.ServiceEndpoint,
 		uid:           args.UID,
 		timestamp:     time.Now().UTC(),
 		timeLastCheck: time.Now().UTC(),
@@ -119,39 +115,6 @@ func (l *lockServer) RUnlock(args *dsync.LockArgs, reply *bool) error {
 	if !l.removeEntry(args.Resource, args.UID, &lri) {
 		return fmt.Errorf("RUnlock unable to find corresponding read lock for uid: %s", args.UID)
 	}
-	return nil
-}
-
-// ForceUnlock - rpc handler for force unlock operation.
-func (l *lockServer) ForceUnlock(args *dsync.LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if len(args.UID) != 0 {
-		return fmt.Errorf("ForceUnlock called with non-empty UID: %s", args.UID)
-	}
-	if _, ok := l.lockMap[args.Resource]; ok { // Only clear lock when set
-		delete(l.lockMap, args.Resource) // Remove the lock (irrespective of write or read lock)
-	}
-	*reply = true
-	return nil
-}
-
-// Expired - rpc handler for expired lock status.
-func (l *lockServer) Expired(args *dsync.LockArgs, reply *bool) error {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if lri, ok := l.lockMap[args.Resource]; ok {
-		// Check whether uid is still active for this name
-		for _, entry := range lri {
-			if entry.uid == args.UID {
-				*reply = false // When uid found, lock is still active so return not expired
-				return nil
-			}
-		}
-	}
-	// When we get here, lock is no longer active due to either args.Resource being absent from map
-	// or uid not found for given args.Resource
-	*reply = true
 	return nil
 }
 
@@ -212,43 +175,4 @@ func getLongLivedLocks(m map[string][]lockRequesterInfo, interval time.Duration)
 	}
 
 	return rslt
-}
-
-// lockMaintenance loops over locks that have been active for some time and checks back
-// with the original server whether it is still alive or not
-//
-// Following logic inside ignores the errors generated for Dsync.Expired operation.
-// - server at client down
-// - some network error (and server is up normally)
-//
-// We will ignore the error, and we will retry later to get a resolve on this lock
-func (l *lockServer) lockMaintenance(interval time.Duration) {
-	l.mutex.Lock()
-	// Get list of long lived locks to check for staleness.
-	nlripLongLived := getLongLivedLocks(l.lockMap, interval)
-	l.mutex.Unlock()
-
-	// Validate if long lived locks are indeed clean.
-	for _, nlrip := range nlripLongLived {
-		// Initialize client based on the long live locks.
-		c := newClient(nlrip.lri.serverAddr, nlrip.lri.rpcPath)
-
-		var expired bool
-
-		// Call back to original server to verify whether the lock is still active (based on name & uid)
-		// We will ignore any errors (see above for reasons), such locks will be retried later to get resolved
-		c.Call("Dsync.Expired", &dsync.LockArgs{
-			Resource: nlrip.name,
-			UID:      nlrip.lri.uid,
-		}, &expired)
-		c.Close()
-
-		if expired {
-			// The lock is no longer active at server that originated the lock
-			// So remove the lock from the map.
-			l.mutex.Lock()
-			l.removeEntryIfExists(nlrip) // Purge the stale entry if it exists.
-			l.mutex.Unlock()
-		}
-	}
 }

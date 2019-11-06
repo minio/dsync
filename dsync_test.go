@@ -80,8 +80,7 @@ func TestMain(m *testing.M) {
 	}
 
 	var err error
-	rpcOwnNodeFakeForTest := 0
-	ds, err = New(clnts, rpcOwnNodeFakeForTest)
+	ds, err = New(clnts)
 	if err != nil {
 		log.Fatalf("set nodes failed with %v", err)
 	}

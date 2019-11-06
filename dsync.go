@@ -22,16 +22,13 @@ import (
 )
 
 // Dsync represents dsync client object which is initialized with
-// authenticated clients, used to initiate lock RPC calls.
+// authenticated clients, used to initiate lock REST calls.
 type Dsync struct {
 	// Number of nodes participating in the distributed locking.
 	dNodeCount int
 
-	// List of rpc client objects, one per lock server.
-	rpcClnts []NetLocker
-
-	// Index into rpc client array for server running on localhost
-	ownNode int
+	// List of rest client objects, one per lock server.
+	restClnts []NetLocker
 
 	// Simple majority based quorum, set to dNodeCount/2+1
 	dquorum int
@@ -40,29 +37,24 @@ type Dsync struct {
 	dquorumReads int
 }
 
-// New - initializes a new dsync object with input rpcClnts.
-func New(rpcClnts []NetLocker, rpcOwnNode int) (*Dsync, error) {
-	if len(rpcClnts) < 2 {
+// New - initializes a new dsync object with input restClnts.
+func New(restClnts []NetLocker) (*Dsync, error) {
+	if len(restClnts) < 2 {
 		return nil, errors.New("Dsync is not designed for less than 2 nodes")
-	} else if len(rpcClnts) > 32 {
+	} else if len(restClnts) > 32 {
 		return nil, errors.New("Dsync is not designed for more than 32 nodes")
 	}
 
-	if rpcOwnNode > len(rpcClnts) {
-		return nil, errors.New("Index for own node is too large")
-	}
-
 	ds := &Dsync{}
-	ds.dNodeCount = len(rpcClnts)
+	ds.dNodeCount = len(restClnts)
 
 	// With odd number of nodes, write and read quorum is basically the same
 	ds.dquorum = int(ds.dNodeCount/2) + 1
 	ds.dquorumReads = int(math.Ceil(float64(ds.dNodeCount) / 2.0))
-	ds.ownNode = rpcOwnNode
 
-	// Initialize node name and rpc path for each NetLocker object.
-	ds.rpcClnts = make([]NetLocker, ds.dNodeCount)
-	copy(ds.rpcClnts, rpcClnts)
+	// Initialize node name and rest path for each NetLocker object.
+	ds.restClnts = make([]NetLocker, ds.dNodeCount)
+	copy(ds.restClnts, restClnts)
 
 	return ds, nil
 }

@@ -32,7 +32,7 @@ import (
 var dsyncLog bool
 
 func init() {
-	// Check for DSYNC_LOG env variable, if set logging will be enabled for failed RPC operations.
+	// Check for DSYNC_LOG env variable, if set logging will be enabled for failed REST operations.
 	dsyncLog = os.Getenv("DSYNC_LOG") == "1"
 	rand.Seed(time.Now().UnixNano())
 }
@@ -179,7 +179,7 @@ func lock(ds *Dsync, locks *[]string, lockName, id, source string, isReadLock bo
 	defer close(ch)
 
 	var wg sync.WaitGroup
-	for index, c := range ds.rpcClnts {
+	for index, c := range ds.restClnts {
 
 		wg.Add(1)
 		// broadcast lock request to all nodes
@@ -187,11 +187,9 @@ func lock(ds *Dsync, locks *[]string, lockName, id, source string, isReadLock bo
 			defer wg.Done()
 
 			args := LockArgs{
-				UID:             id,
-				Resource:        lockName,
-				ServerAddr:      ds.rpcClnts[ds.ownNode].ServerAddr(),
-				ServiceEndpoint: ds.rpcClnts[ds.ownNode].ServiceEndpoint(),
-				Source:          source,
+				UID:      id,
+				Resource: lockName,
+				Source:   source,
 			}
 
 			var locked bool
@@ -277,19 +275,12 @@ func lock(ds *Dsync, locks *[]string, lockName, id, source string, isReadLock bo
 			grantToBeReleased := <-ch
 			if grantToBeReleased.isLocked() {
 				// release lock
-				sendRelease(ds, ds.rpcClnts[grantToBeReleased.index], lockName, grantToBeReleased.lockUID, isReadLock)
+				sendRelease(ds, ds.restClnts[grantToBeReleased.index], lockName, grantToBeReleased.lockUID, isReadLock)
 			}
 		}
 	}(isReadLock)
 
 	wg.Wait()
-
-	// Verify that localhost server is actively participating in the lock (the lock maintenance relies on this fact)
-	if quorum && !isLocked((*locks)[ds.ownNode]) {
-		// If not, release lock (and try again later)
-		releaseAll(ds, locks, lockName, isReadLock)
-		quorum = false
-	}
 
 	return quorum
 }
@@ -318,7 +309,7 @@ func quorumMet(locks *[]string, isReadLock bool, quorum, quorumReads int) bool {
 func releaseAll(ds *Dsync, locks *[]string, lockName string, isReadLock bool) {
 	for lock := 0; lock < ds.dNodeCount; lock++ {
 		if isLocked((*locks)[lock]) {
-			sendRelease(ds, ds.rpcClnts[lock], lockName, (*locks)[lock], isReadLock)
+			sendRelease(ds, ds.restClnts[lock], lockName, (*locks)[lock], isReadLock)
 			(*locks)[lock] = ""
 		}
 	}
@@ -387,7 +378,7 @@ func unlock(ds *Dsync, locks []string, name string, isReadLock bool) {
 	// We don't need to synchronously wait until we have released all the locks (or the quorum)
 	// (a subsequent lock will retry automatically in case it would fail to get quorum)
 
-	for index, c := range ds.rpcClnts {
+	for index, c := range ds.restClnts {
 
 		if isLocked(locks[index]) {
 			// broadcast lock release to all nodes that granted the lock
@@ -396,37 +387,13 @@ func unlock(ds *Dsync, locks []string, name string, isReadLock bool) {
 	}
 }
 
-// ForceUnlock will forcefully clear a write or read lock.
-func (dm *DRWMutex) ForceUnlock() {
-	{
-		dm.m.Lock()
-		defer dm.m.Unlock()
-
-		// Clear write locks array
-		dm.writeLocks = make([]string, dm.clnt.dNodeCount)
-		// Clear read locks array
-		dm.readersLocks = nil
-	}
-
-	for _, c := range dm.clnt.rpcClnts {
-		// broadcast lock release to all nodes that granted the lock
-		sendRelease(dm.clnt, c, dm.Name, "", false)
-	}
-}
-
 // sendRelease sends a release message to a node that previously granted a lock
 func sendRelease(ds *Dsync, c NetLocker, name, uid string, isReadLock bool) {
 	args := LockArgs{
-		UID:             uid,
-		Resource:        name,
-		ServerAddr:      ds.rpcClnts[ds.ownNode].ServerAddr(),
-		ServiceEndpoint: ds.rpcClnts[ds.ownNode].ServiceEndpoint(),
+		UID:      uid,
+		Resource: name,
 	}
-	if len(uid) == 0 {
-		if _, err := c.ForceUnlock(args); err != nil {
-			log("Unable to call ForceUnlock", err)
-		}
-	} else if isReadLock {
+	if isReadLock {
 		if _, err := c.RUnlock(args); err != nil {
 			log("Unable to call RUnlock", err)
 		}

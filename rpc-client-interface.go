@@ -24,12 +24,6 @@ type LockArgs struct {
 	// Resource contains a entity to be locked/unlocked.
 	Resource string
 
-	// ServerAddr contains the address of the server who requested lock/unlock of the above resource.
-	ServerAddr string
-
-	// ServiceEndpoint contains the network path of above server to do lock/unlock.
-	ServiceEndpoint string
-
 	// Source contains the line number, function and file name of the code
 	// on the client node that requested the lock.
 	Source string
@@ -56,11 +50,6 @@ type NetLocker interface {
 	// * a boolean to indicate success/failure of the operation
 	// * an error on failure of unlock request operation.
 	Unlock(args LockArgs) (bool, error)
-
-	// Unlock (read/write) forcefully for given LockArgs. It should return
-	// * a boolean to indicate success/failure of the operation
-	// * an error on failure of unlock request operation.
-	ForceUnlock(args LockArgs) (bool, error)
 
 	// Return this lock server address.
 	ServerAddr() string

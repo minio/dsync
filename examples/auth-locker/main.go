@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// Initialize dsync and treat 0th index on lockClients as self node.
-	ds, err := dsync.New(lockClients, 0)
+	ds, err := dsync.New(lockClients)
 	if err != nil {
 		log.Fatal("Fail to initialize dsync.", err)
 	}
