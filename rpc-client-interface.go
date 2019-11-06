@@ -67,4 +67,7 @@ type NetLocker interface {
 
 	// Return this lock server service endpoint on which the server runs.
 	ServiceEndpoint() string
+
+	// Close closes any underlying connection to the service endpoint
+	Close() error
 }
