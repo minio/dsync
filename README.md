@@ -97,7 +97,7 @@ Here is a simple example showing how to protect a single resource (drop-in repla
 
 ```go
 import (
-	"github.com/minio/dsync/v2"
+	"github.com/minio/dsync/v3"
 )
 
 func lockSameResource() {

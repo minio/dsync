@@ -51,11 +51,8 @@ type NetLocker interface {
 	// * an error on failure of unlock request operation.
 	Unlock(args LockArgs) (bool, error)
 
-	// Return this lock server address.
-	ServerAddr() string
-
-	// Return this lock server service endpoint on which the server runs.
-	ServiceEndpoint() string
+	// Returns underlying endpoint of this lock client instance.
+	String() string
 
 	// Close closes any underlying connection to the service endpoint
 	Close() error

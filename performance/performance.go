@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/dsync/v2"
+	"github.com/minio/dsync/v3"
 )
 
 const rpcPath = "/dsync"

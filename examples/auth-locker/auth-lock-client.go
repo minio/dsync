@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/dsync/v2"
+	"github.com/minio/dsync/v3"
 )
 
 // defaultDialTimeout is used for non-secure connection.
@@ -209,10 +209,6 @@ func (rpcClient *ReconnectRPCClient) Close() (err error) {
 	return nil
 }
 
-func (rpcClient *ReconnectRPCClient) ServerAddr() string {
-	return rpcClient.serverAddr
-}
-
-func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
-	return rpcClient.serviceEndpoint
+func (rpcClient *ReconnectRPCClient) String() string {
+	return "http://" + rpcClient.serverAddr + "/" + rpcClient.serviceEndpoint
 }

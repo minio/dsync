@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"sync"
 
-	. "github.com/minio/dsync/v2"
+	. "github.com/minio/dsync/v3"
 )
 
 const WriteLock = -1

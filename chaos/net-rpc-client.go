@@ -20,7 +20,7 @@ import (
 	"net/rpc"
 	"sync"
 
-	"github.com/minio/dsync/v2"
+	"github.com/minio/dsync/v3"
 )
 
 // ReconnectRPCClient is a wrapper type for rpc.Client which provides reconnect on first failure.
@@ -101,15 +101,6 @@ func (rpcClient *ReconnectRPCClient) Unlock(args dsync.LockArgs) (status bool, e
 	return status, err
 }
 
-func (rpcClient *ReconnectRPCClient) ForceUnlock(args dsync.LockArgs) (status bool, err error) {
-	err = rpcClient.Call("Dsync.ForceUnlock", &args, &status)
-	return status, err
-}
-
-func (rpcClient *ReconnectRPCClient) ServerAddr() string {
-	return rpcClient.addr
-}
-
-func (rpcClient *ReconnectRPCClient) ServiceEndpoint() string {
-	return rpcClient.endpoint
+func (rpcClient *ReconnectRPCClient) String() string {
+	return "http://" + rpcClient.addr + "/" + rpcClient.endpoint
 }
