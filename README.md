@@ -1,3 +1,5 @@
+> This project has moved to https://github.com/minio/minio/tree/master/pkg/dsync
+
 dsync [![Slack](https://slack.minio.io/slack?type=svg)](https://slack.minio.io) [![Go Report Card](https://goreportcard.com/badge/minio/minio)](https://goreportcard.com/report/minio/minio) [![codecov](https://codecov.io/gh/minio/dsync/branch/master/graph/badge.svg)](https://codecov.io/gh/minio/dsync)
 =====
 
